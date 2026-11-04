@@ -38,6 +38,7 @@ public class PlayerController : MonoBehaviour
     {
         controller = GetComponent<CharacterController>();
         controller.height = standingHeight;
+        controller.center = Vector3.zero;
 
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
@@ -51,11 +52,17 @@ public class PlayerController : MonoBehaviour
         Move();
     }
 
-    // CharacterController.isGrounded 대신 물리 구체 체크로 확실하게 바닥 감지
+    // 캡슐 아래쪽 반구 중심에서 아래로 SphereCast 해서 바닥 감지
+    // (SphereCast는 시작 시점에 겹쳐 있는 자기 자신의 콜라이더를 무시하므로 자기 몸에 걸리지 않음)
     void CheckGrounded()
     {
-        Vector3 spherePosition = new Vector3(transform.position.x, transform.position.y - (controller.height / 2f) + controller.radius, transform.position.z);
-        isGrounded = Physics.CheckSphere(spherePosition, controller.radius + groundCheckDistance, groundMask, QueryTriggerInteraction.Ignore);
+        float castRadius = controller.radius * 0.95f;
+        Vector3 bottomSphereCenter = transform.TransformPoint(controller.center)
+                                     + Vector3.down * (controller.height / 2f - controller.radius);
+        float castDistance = controller.skinWidth + groundCheckDistance + (controller.radius - castRadius);
+
+        isGrounded = controller.isGrounded ||
+                     Physics.SphereCast(bottomSphereCenter, castRadius, Vector3.down, out _, castDistance, groundMask, QueryTriggerInteraction.Ignore);
 
         // 바닥에 안정적으로 붙어있을 때 아래 방향 누적 가속도 초기화
         if (isGrounded && verticalVelocity.y < 0)
@@ -74,7 +81,8 @@ public class PlayerController : MonoBehaviour
         float targetCamY = isCrouching ? crouchCamY : standingCamY;
 
         controller.height = Mathf.Lerp(controller.height, targetHeight, Time.deltaTime * crouchTransitionSpeed);
-        controller.center = new Vector3(0, controller.height / 2f, 0);
+        // 피벗은 서 있을 때 캡슐 중앙 → 높이가 줄어도 발바닥 위치가 고정되도록 중심을 내림
+        controller.center = new Vector3(0, (controller.height - standingHeight) / 2f, 0);
 
         if (cameraTransform != null)
         {
