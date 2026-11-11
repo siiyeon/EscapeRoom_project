@@ -17,6 +17,20 @@ public class DoubleDoorController : MonoBehaviour
     [Header("상호작용 설정")]
     public float interactionDistance = 3.5f;
 
+    [Header("들어오면 잠그기 (엔딩 전까지 다시 안 열림)")]
+    public bool lockWhenPlayerEnters = true;
+    public float lockDistanceInside = 2.2f;   // 문을 지나 안쪽으로 이만큼 들어오면 쾅 닫고 잠금 (문짝 폭 약 1.9m보다 멀리)
+    public string insideMarkerName = "Door_1F_C08"; // 건물 안에 있는 오브젝트 (안쪽 방향 판단용)
+
+    // 씬이 바뀌어도(교실 갔다가 돌아와도) 잠금 유지. 엔딩에서 UnlockForEnding()으로 푼다.
+    private static bool lockedUntilEnding = false;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    static void ResetOnGameStart() => lockedUntilEnding = false;
+
+    private Vector3 doorNormal;      // 문 면에 수직 (수평)
+    private float insideSign = 0f;   // doorNormal 기준 건물 안쪽이 +1인지 -1인지 (0 = 아직 모름)
+
     // 모델의 피벗이 경첩 위치가 아닐 수 있으므로, 문 바깥쪽 모서리에 회전축(경첩)을 만들어 그걸 돌린다
     private Transform leftHinge;
     private Transform rightHinge;
@@ -66,11 +80,32 @@ public class DoubleDoorController : MonoBehaviour
 
         leftClosedRot = leftHinge.localRotation;
         rightClosedRot = rightHinge.localRotation;
+
+        doorNormal = Vector3.Cross(Vector3.up, doorAxis);
+        GameObject insideMarker = string.IsNullOrEmpty(insideMarkerName) ? null : GameObject.Find(insideMarkerName);
+        if (insideMarker != null)
+            insideSign = Mathf.Sign(Vector3.Dot(insideMarker.transform.position - doorwayCenter, doorNormal));
+
+        // 이미 들어와서 잠긴 상태로 학교 씬에 돌아온 경우 (교실 씬 → 학교 씬)
+        if (lockedUntilEnding) isLocked = true;
     }
 
     void Update()
     {
-        if (isLocked || playerTransform == null) return;
+        if (playerTransform == null) return;
+
+        if (isOpen && !isLocked && lockWhenPlayerEnters && insideSign != 0f)
+        {
+            float depth = Vector3.Dot(playerTransform.position - doorwayCenter, doorNormal) * insideSign;
+            if (depth > lockDistanceInside)
+            {
+                SlamAndLockDoors();
+                lockedUntilEnding = true;
+                return;
+            }
+        }
+
+        if (isLocked) return;
         if (Keyboard.current == null) return;
 
         float dist = Vector3.Distance(doorwayCenter, playerTransform.position);
@@ -87,9 +122,11 @@ public class DoubleDoorController : MonoBehaviour
         isOpen = true;
 
         // 플레이어 반대쪽으로 열리도록 회전 방향 결정
-        Vector3 doorNormal = Vector3.Cross(Vector3.up, doorAxis);
         Vector3 toPlayer = playerTransform != null ? playerTransform.position - doorwayCenter : doorNormal;
         float side = Vector3.Dot(toPlayer, doorNormal) >= 0f ? 1f : -1f;
+
+        // 건물 안쪽을 알 수 없으면, 처음 문을 연 쪽을 바깥으로 본다
+        if (insideSign == 0f) insideSign = -side;
 
         // 왼쪽 문 끝은 +doorAxis 방향 → Y축 +각도 회전 시 +doorNormal 쪽으로 이동 (Unity 왼손 좌표계)
         // 플레이어가 있는 쪽(side)의 반대로 열리도록 부호를 뒤집는다. 오른쪽 문은 거울 대칭.
@@ -113,6 +150,13 @@ public class DoubleDoorController : MonoBehaviour
         isLocked = true;
         isOpen = false;
         StartAnimation(leftClosedRot, rightClosedRot, 10f);
+    }
+
+    /// <summary>엔딩 때 호출: 정문 잠금을 풀어서 다시 E키로 열 수 있게 한다.</summary>
+    public void UnlockForEnding()
+    {
+        lockedUntilEnding = false;
+        isLocked = false;
     }
 
     void StartAnimation(Quaternion targetLeft, Quaternion targetRight, float speed)
