@@ -3,7 +3,12 @@ guid: 838935d04b2b4b546a9045d7aca9f8f7
 ModelImporter:
   serializedVersion: 24300
   internalIDToNameTable: []
-  externalObjects: {}
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Key2_Bloody
+    second: {fileID: 2100000, guid: 60519a1eb7fa42099c0379275e6a7307, type: 2}
   materials:
     materialImportMode: 2
     materialName: 0

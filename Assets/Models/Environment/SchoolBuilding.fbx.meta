@@ -3,7 +3,102 @@ guid: a5201e6a269c861418a6283ddca59533
 ModelImporter:
   serializedVersion: 24300
   internalIDToNameTable: []
-  externalObjects: {}
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Bark
+    second: {fileID: 2100000, guid: a936befc1e0d4a028bfa13d47e03311f, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: BrokenGlass
+    second: {fileID: 2100000, guid: 9546597f3c764e2bbcaf4bf4634dd490, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Concrete
+    second: {fileID: 2100000, guid: ca61b04abae04c77828e7c4c207befcc, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ConcreteDark
+    second: {fileID: 2100000, guid: 65402e94843144a79e26b8e70c99e5b6, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Debris_Book
+    second: {fileID: 2100000, guid: aeb94c448f5245339ba796e35b9e655e, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Debris_CeilingBoard
+    second: {fileID: 2100000, guid: f8b63f5edb8942e384a937791de41f67, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Debris_Glass
+    second: {fileID: 2100000, guid: 101b344edca84245adb5cf0859e546e7, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Debris_Paper
+    second: {fileID: 2100000, guid: 1fdc42fb2b594500862760ed61b1df03, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Debris_Plaster
+    second: {fileID: 2100000, guid: 4a3a3520ce6443ca99af382ea5ca5ea0, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: DoorWood
+    second: {fileID: 2100000, guid: 9e57e3916d294620857af9765189cfab, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: DoorWoodDark
+    second: {fileID: 2100000, guid: 7c39f8dc7bb54e1ea0ea6918f960bbaf, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: FenceMetal
+    second: {fileID: 2100000, guid: 2ea93293a8b44e608fcb410acde5028e, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: FloorSlab
+    second: {fileID: 2100000, guid: ac082994a26f41a3b66e9f6bca9bd430, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Ground
+    second: {fileID: 2100000, guid: 0504f2b026cf4007add8cc639138bb34, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: LineWhite
+    second: {fileID: 2100000, guid: b229a5606e92407eaee29c31319ed892, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PlaygroundDirt
+    second: {fileID: 2100000, guid: 75e63e21e93342dea1f7a270de562cf5, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: SchoolPaint_Trim
+    second: {fileID: 2100000, guid: 12ddb0a2541f4e40b07d2dc2f640f784, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: SchoolPaint_Wall
+    second: {fileID: 2100000, guid: 5bb5e3e5f4794f30917c3a3bd6211276, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: TreeLeaf
+    second: {fileID: 2100000, guid: 66d9b82c85cf448193c0c8a1db58cfe5, type: 2}
   materials:
     materialImportMode: 2
     materialName: 0
