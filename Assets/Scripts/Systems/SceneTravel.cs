@@ -4,7 +4,7 @@ using UnityEngine.SceneManagement;
 
 /// <summary>
 /// 씬 이동 담당. 화면을 어둡게 → 씬 로드 → 도착할 문(SceneDoor) 앞에 플레이어 배치 → 화면 밝게.
-/// 플레이어(태그 Player)는 씬이 바뀌어도 유지된다 (손전등 배터리 등 상태 그대로).
+/// 플레이어(태그 Player)는 씬이 바뀌어도 유지된다 (주운 열쇠 등 상태 그대로).
 /// 새 씬에 들어 있는 다른 Player는 자동으로 지운다.
 /// </summary>
 public class SceneTravel : MonoBehaviour

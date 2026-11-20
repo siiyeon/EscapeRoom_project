@@ -9,8 +9,10 @@ public class KeyPickup : MonoBehaviour
     // Session state survives scene loads, including returning to SampleScene.
     public static bool HasKey2 { get; private set; }
     public static bool ConsumedInteractionThisFrame => pickupFrame == Time.frameCount;
+    public const string ItemId = "GateKey"; // 인벤토리 아이템 id
     static int pickupFrame = -1;
-    [Min(0.1f)] public float interactionDistance = 2f;
+    [Min(0.1f)] public float interactionDistance = 1.8f;
+    [Range(5f, 90f)] public float viewAngle = 20f; // 화면 가운데에서 이 각도 안에 열쇠가 보이면 집을 수 있음
     [Min(0.1f)] public float noticeDuration = 2.5f;
     bool collected, focused;
     float noticeUntil;
@@ -71,29 +73,54 @@ public class KeyPickup : MonoBehaviour
     void Update()
     {
         focused = false;
-        if (collected || SceneTravel.IsTraveling) return;
+        if (collected || SceneTravel.IsTraveling || InventoryUI.IsOpen) return;
         if (HasKey2) { HideKey(); return; }
         Camera view = Camera.main;
         if (view == null) return;
         var player = view.GetComponentInParent<PlayerController>();
         if (player == null || !player.isActiveAndEnabled) return;
-        Ray ray = new Ray(view.transform.position, view.transform.forward);
-        float distance = float.PositiveInfinity;
-        Collider nearest = null;
-        foreach (var hit in Physics.RaycastAll(ray, interactionDistance, ~0, QueryTriggerInteraction.Collide))
-        {
-            if (hit.collider.transform.IsChildOf(player.transform)) continue;
-            if (hit.collider.isTrigger && hit.collider.GetComponentInParent<KeyPickup>() == null) continue;
-            if (hit.distance >= distance) continue;
-            distance = hit.distance;
-            nearest = hit.collider;
-        }
-        focused = nearest != null && nearest.GetComponentInParent<KeyPickup>() == this;
+        focused = CanReach(view, player.transform);
         if (!focused || Keyboard.current == null || !Keyboard.current.eKey.wasPressedThisFrame) return;
         pickupFrame = Time.frameCount;
         HasKey2 = true;
         noticeUntil = Time.unscaledTime + noticeDuration;
+        // 인벤토리에 넣기 (아이콘은 숨기기 전에 열쇠 모델을 찍어서 만든다)
+        Inventory.Add(new InventoryItem
+        {
+            Id = ItemId,
+            SlotName = "열쇠",
+            SlotSubName = "Key",
+            Title = "정문 열쇠 (Key)",
+            Description = "철문의 자물쇠를 열 수 있을 것 같다.",
+            Icon = ItemIconRenderer.Render(gameObject),
+        });
         HideKey();
+    }
+
+    // 열쇠가 가까이 있고 화면 가운데 근처에 보이기만 하면 집을 수 있다 (정확히 조준할 필요 없음)
+    bool CanReach(Camera view, Transform player)
+    {
+        Vector3 eye = view.transform.position;
+        Vector3 keyCenter = transform.TransformPoint(GetComponent<BoxCollider>().center);
+        Vector3 toKey = keyCenter - eye;
+        if (toKey.magnitude > interactionDistance) return false;
+        if (Vector3.Angle(view.transform.forward, toKey) > viewAngle) return false;
+        if (toKey.magnitude < 0.8f) return true; // 바로 앞이면 시야 검사 생략
+
+        // 벽 너머 열쇠는 집지 않도록: 열쇠 중심이나 위쪽 중 하나라도 가리는 것 없이 보이면 OK
+        Vector3[] targets = { keyCenter, keyCenter + Vector3.up * 0.1f };
+        foreach (Vector3 target in targets)
+        {
+            bool blocked = false;
+            foreach (var hit in Physics.RaycastAll(eye, target - eye, Vector3.Distance(eye, target), ~0, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.collider.transform.IsChildOf(player) || hit.collider.transform.IsChildOf(transform)) continue;
+                blocked = true;
+                break;
+            }
+            if (!blocked) return true;
+        }
+        return false;
     }
 
     void HideKey()
@@ -106,7 +133,7 @@ public class KeyPickup : MonoBehaviour
 
     void OnGUI()
     {
-        if (SceneTravel.IsTraveling) return;
+        if (SceneTravel.IsTraveling || InventoryUI.IsOpen) return;
         if (!collected)
         {
             Color previous = GUI.color;
@@ -114,7 +141,7 @@ public class KeyPickup : MonoBehaviour
             GUI.DrawTexture(new Rect(Screen.width * 0.5f - 2f, Screen.height * 0.5f - 2f, 4f, 4f), Texture2D.whiteTexture);
             GUI.color = previous;
         }
-        string message = Time.unscaledTime < noticeUntil ? "Key2 열쇠를 획득했습니다." : focused ? "[E] Key2 열쇠 줍기" : null;
+        string message = Time.unscaledTime < noticeUntil ? "정문 열쇠를 획득했다.  [TAB] 인벤토리" : focused ? "[E] 열쇠 줍기" : null;
         if (message == null) return;
         if (style == null)
         {
@@ -122,7 +149,7 @@ public class KeyPickup : MonoBehaviour
             style = new GUIStyle(GUI.skin.box) { font = font, fontSize = 22, alignment = TextAnchor.MiddleCenter };
             style.normal.textColor = Color.white;
         }
-        GUI.Box(new Rect((Screen.width - 440f) / 2f, Screen.height * 0.75f, 440f, 54f), message, style);
+        GUI.Box(new Rect((Screen.width - 520f) / 2f, Screen.height * 0.75f, 520f, 54f), message, style);
     }
 
     void OnDestroy() { if (font != null) Destroy(font); }

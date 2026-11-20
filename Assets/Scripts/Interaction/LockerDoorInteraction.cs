@@ -43,7 +43,7 @@ public class LockerDoorInteraction : MonoBehaviour
     void Update()
     {
         focusedDoor = null;
-        if (SceneTravel.IsTraveling || KeyPickup.ConsumedInteractionThisFrame) return;
+        if (SceneTravel.IsTraveling || KeyPickup.ConsumedInteractionThisFrame || InventoryUI.IsOpen) return;
         Camera view = Camera.main;
         if (view == null) return;
         var player = view.GetComponentInParent<PlayerController>();
@@ -65,7 +65,7 @@ public class LockerDoorInteraction : MonoBehaviour
 
     void OnGUI()
     {
-        if (focusedDoor == null || SceneTravel.IsTraveling || KeyPickup.ConsumedInteractionThisFrame) return;
+        if (focusedDoor == null || SceneTravel.IsTraveling || KeyPickup.ConsumedInteractionThisFrame || InventoryUI.IsOpen) return;
         if (style == null)
         {
             font = Font.CreateDynamicFontFromOSFont("Malgun Gothic", 20);

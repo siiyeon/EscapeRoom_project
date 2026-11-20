@@ -69,7 +69,7 @@ public class SceneDoor : MonoBehaviour
 
     void Update()
     {
-        if (isLocked || SceneTravel.IsTraveling || KeyPickup.ConsumedInteractionThisFrame || Keyboard.current == null) return;
+        if (isLocked || SceneTravel.IsTraveling || KeyPickup.ConsumedInteractionThisFrame || InventoryUI.IsOpen || Keyboard.current == null) return;
         if (!Keyboard.current.eKey.wasPressedThisFrame) return;
 
         if (player == null)

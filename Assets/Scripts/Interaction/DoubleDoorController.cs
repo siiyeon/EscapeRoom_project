@@ -109,7 +109,7 @@ public class DoubleDoorController : MonoBehaviour
         if (Keyboard.current == null) return;
 
         float dist = Vector3.Distance(doorwayCenter, playerTransform.position);
-        if (!KeyPickup.ConsumedInteractionThisFrame && dist <= interactionDistance && Keyboard.current.eKey.wasPressedThisFrame)
+        if (!KeyPickup.ConsumedInteractionThisFrame && !InventoryUI.IsOpen && dist <= interactionDistance && Keyboard.current.eKey.wasPressedThisFrame)
         {
             if (isOpen) CloseDoors();
             else OpenDoors();
