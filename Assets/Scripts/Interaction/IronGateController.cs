@@ -153,7 +153,12 @@ public class IronGateController : MonoBehaviour
             leftHinge.localRotation = leftOpen;
             rightHinge.localRotation = rightOpen;
         }
-        else StartCoroutine(Swing(leftOpen, rightOpen));
+        else
+        {
+            AudioClip openingSound = Resources.Load<AudioClip>("Audio/IronGateOpen");
+            if (openingSound != null) AudioSource.PlayClipAtPoint(openingSound, gateCenter);
+            StartCoroutine(Swing(leftOpen, rightOpen));
+        }
     }
 
     IEnumerator Swing(Quaternion leftOpen, Quaternion rightOpen)
