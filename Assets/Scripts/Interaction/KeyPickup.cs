@@ -15,9 +15,6 @@ public class KeyPickup : MonoBehaviour
     [Range(5f, 90f)] public float viewAngle = 20f; // 화면 가운데에서 이 각도 안에 열쇠가 보이면 집을 수 있음
     [Min(0.1f)] public float noticeDuration = 2.5f;
     bool collected, focused;
-    float noticeUntil;
-    GUIStyle style;
-    Font font;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     static void ResetInventory() { HasKey2 = false; pickupFrame = -1; }
@@ -80,10 +77,13 @@ public class KeyPickup : MonoBehaviour
         var player = view.GetComponentInParent<PlayerController>();
         if (player == null || !player.isActiveAndEnabled) return;
         focused = CanReach(view, player.transform);
+        if (focused) GameHUD.Prompt("[E] 열쇠 줍기");
         if (!focused || Keyboard.current == null || !Keyboard.current.eKey.wasPressedThisFrame) return;
         pickupFrame = Time.frameCount;
         HasKey2 = true;
-        noticeUntil = Time.unscaledTime + noticeDuration;
+        GameHUD.Say("정문 열쇠를 획득했다.", noticeDuration);   // 대사 (화면 아래)
+        GameHUD.Hint("[TAB] 인벤토리", noticeDuration);       // 조작 안내 (화면 가운데 아래)
+        StartCoroutine(SayAfter("이제 학교에 들어가자", noticeDuration)); // 이어서 다음 혼잣말
         // 인벤토리에 넣기 (아이콘은 숨기기 전에 열쇠 모델을 찍어서 만든다)
         Inventory.Add(new InventoryItem
         {
@@ -124,6 +124,12 @@ public class KeyPickup : MonoBehaviour
         return false;
     }
 
+    System.Collections.IEnumerator SayAfter(string line, float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        GameHUD.Say(line, noticeDuration);
+    }
+
     void HideKey()
     {
         collected = true;
@@ -134,24 +140,12 @@ public class KeyPickup : MonoBehaviour
 
     void OnGUI()
     {
-        if (SceneTravel.IsTraveling || InventoryUI.IsOpen) return;
-        if (!collected)
-        {
-            Color previous = GUI.color;
-            GUI.color = focused ? Color.green : Color.white;
-            GUI.DrawTexture(new Rect(Screen.width * 0.5f - 2f, Screen.height * 0.5f - 2f, 4f, 4f), Texture2D.whiteTexture);
-            GUI.color = previous;
-        }
-        string message = Time.unscaledTime < noticeUntil ? "정문 열쇠를 획득했다.  [TAB] 인벤토리" : focused ? "[E] 열쇠 줍기" : null;
-        if (message == null) return;
-        if (style == null)
-        {
-            font = Font.CreateDynamicFontFromOSFont("Malgun Gothic", 22);
-            style = new GUIStyle(GUI.skin.box) { font = font, fontSize = 22, alignment = TextAnchor.MiddleCenter };
-            style.normal.textColor = Color.white;
-        }
-        GUI.Box(new Rect((Screen.width - 520f) / 2f, Screen.height * 0.75f, 520f, 54f), message, style);
+        if (SceneTravel.IsTraveling || InventoryUI.IsOpen || collected) return;
+        // 화면 가운데 조준점 (열쇠를 집을 수 있으면 초록색)
+        Color previous = GUI.color;
+        GUI.color = focused ? Color.green : Color.white;
+        GUI.DrawTexture(new Rect(Screen.width * 0.5f - 2f, Screen.height * 0.5f - 2f, 4f, 4f), Texture2D.whiteTexture);
+        GUI.color = previous;
     }
 
-    void OnDestroy() { if (font != null) Destroy(font); }
 }

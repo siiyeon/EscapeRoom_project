@@ -19,16 +19,14 @@ public class OutsideBoundary : MonoBehaviour
     public float warnDistance = 0.8f;   // 벽에 이만큼 가까워지면 말풍선
     public float noticeDuration = 2.5f;
     // 옆 벽에 다가갈 때마다 이 중 하나가 랜덤으로 나온다
-    public string[] sideMessagesNoKey = { "열쇠는 멀리 있을 것 같지 않다.", "철문 주변에 열쇠가 있을 것 같은데..?" };
-    public string backMessage = "학교에 들어가야 할 것만 같아...";
+    // 열쇠를 줍기 전: 옆/뒤 어느 벽이든 이 대사, 열쇠를 주운 뒤: withKeyMessage
+    public string[] sideMessagesNoKey = { "철문 주변에 열쇠가 있다고 했지.." };
+    public string withKeyMessage = "이제 학교에 들어가자";
 
     float sideLimit, backLimit;
     int nearWall; // 0 = 벽 근처 아님, 1 = 옆 벽, 2 = 뒤 벽 (벽에 새로 다가갈 때만 랜덤 멘트를 다시 고른다)
     Transform player;
     string notice;
-    float noticeUntil;
-    GUIStyle style;
-    Font font;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     static void Init()
@@ -100,28 +98,13 @@ public class OutsideBoundary : MonoBehaviour
         if (wall != 0 && wall != nearWall)
         {
             // 벽에 새로 다가간 순간 멘트를 고른다
-            if (wall == 2 || KeyPickup.HasKey2 || sideMessagesNoKey.Length == 0) notice = backMessage;
+            if (KeyPickup.HasKey2 || sideMessagesNoKey.Length == 0) notice = withKeyMessage;
             else notice = sideMessagesNoKey[Random.Range(0, sideMessagesNoKey.Length)];
         }
         nearWall = wall;
-        if (wall != 0) noticeUntil = Time.unscaledTime + noticeDuration; // 벽 앞에 있는 동안 계속 보이고, 떠나면 잠시 후 사라짐
+        if (wall != 0) GameHUD.Say(notice, noticeDuration); // 벽 앞에 있는 동안 계속 보이고, 떠나면 잠시 후 사라짐
     }
 
-    void OnGUI()
-    {
-        if (SceneTravel.IsTraveling || InventoryUI.IsOpen) return;
-        if (Time.unscaledTime >= noticeUntil || string.IsNullOrEmpty(notice)) return;
-        if (style == null)
-        {
-            font = Font.CreateDynamicFontFromOSFont("Malgun Gothic", 22);
-            style = new GUIStyle(GUI.skin.box) { font = font, fontSize = 22, alignment = TextAnchor.MiddleCenter, wordWrap = true };
-            style.normal.textColor = Color.white;
-        }
-        float height = notice.Contains("\n") ? 84f : 54f;
-        GUI.Box(new Rect((Screen.width - 560f) / 2f, Screen.height * 0.58f, 560f, height), notice, style);
-    }
-
-    void OnDestroy() { if (font != null) Destroy(font); }
 
     static Bounds WorldBounds(Transform t)
     {

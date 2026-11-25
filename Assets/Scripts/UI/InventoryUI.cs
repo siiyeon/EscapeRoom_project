@@ -30,7 +30,7 @@ public class InventoryUI : MonoBehaviour
     float feedbackUntil;
 
     Texture2D white, vignette;
-    Font font, boldFont;
+    Font font;
     GUIStyle badgeStyle, titleStyle, missionStyle, headerStyle, itemTitleStyle, descStyle, hintStyle, slotTextStyle, feedbackStyle, emptyStyle;
 
     // 색
@@ -144,7 +144,7 @@ public class InventoryUI : MonoBehaviour
 
     void Open()
     {
-        if (SceneTravel.IsTraveling || IsOpen) return;
+        if (SceneTravel.IsTraveling || IsOpen || IntroRadio.IsPlaying) return; // 시작 무전 연출 중에는 안 열림
         IsOpen = true;
         IReadOnlyList<InventoryItem> list = section == Section.Gear ? Inventory.Gear : Inventory.Items;
         if (selected >= list.Count) { section = Section.Items; selected = 0; }
@@ -176,7 +176,6 @@ public class InventoryUI : MonoBehaviour
         if (white != null) Destroy(white);
         if (vignette != null) Destroy(vignette);
         if (font != null) Destroy(font);
-        if (boldFont != null) Destroy(boldFont);
     }
 
     // ───────────────────────── 그리기 ─────────────────────────
@@ -342,15 +341,14 @@ public class InventoryUI : MonoBehaviour
 
         // 맑은 고딕에는 기울임꼴이 없고 굵은 글씨는 별도 글꼴이라, 가짜로 기울이거나 굵게 만들면 글씨가 깨진다
         font = Font.CreateDynamicFontFromOSFont(new[] { "Malgun Gothic", "맑은 고딕", "Arial" }, 24);
-        boldFont = Font.CreateDynamicFontFromOSFont(new[] { "Malgun Gothic Bold", "맑은 고딕 Bold", "Malgun Gothic", "Arial" }, 24);
         titleStyle = Style(40, FontStyle.Normal, TextAnchor.MiddleLeft, TextMain);
         missionStyle = Style(22, FontStyle.Normal, TextAnchor.MiddleRight, MissionRed);
         headerStyle = Style(21, FontStyle.Normal, TextAnchor.MiddleLeft, TextDim);
-        itemTitleStyle = Style(24, FontStyle.Bold, TextAnchor.MiddleLeft, TextMain);
-        descStyle = Style(18, FontStyle.Normal, TextAnchor.UpperLeft, TextDim);
+        itemTitleStyle = Style(28, FontStyle.Normal, TextAnchor.MiddleLeft, TextMain);
+        descStyle = Style(21, FontStyle.Normal, TextAnchor.UpperLeft, TextDim);
         descStyle.wordWrap = true;
         hintStyle = Style(18, FontStyle.Normal, TextAnchor.MiddleRight, TextDim);
-        slotTextStyle = Style(16, FontStyle.Bold, TextAnchor.MiddleCenter, TextMain);
+        slotTextStyle = Style(16, FontStyle.Normal, TextAnchor.MiddleCenter, TextMain);
         feedbackStyle = Style(18, FontStyle.Normal, TextAnchor.MiddleLeft, MissionRed);
         emptyStyle = Style(20, FontStyle.Normal, TextAnchor.MiddleLeft, TextDim);
         badgeStyle = Style(15, FontStyle.Normal, TextAnchor.LowerRight, TextMain);
@@ -360,8 +358,9 @@ public class InventoryUI : MonoBehaviour
 
     GUIStyle Style(int size, FontStyle fs, TextAnchor anchor, Color color)
     {
-        bool bold = fs == FontStyle.Bold;
-        var s = new GUIStyle { font = bold ? boldFont : font, fontSize = size, fontStyle = FontStyle.Normal, alignment = anchor, richText = false };
+        // 모든 글씨는 일반 맑은 고딕 하나로 그린다.
+        // ("Malgun Gothic Bold"라는 글꼴은 따로 불러올 수 없어서, 그걸 쓰던 제목 칸에 다른 글씨가 대신 그려지는 문제가 있었다)
+        var s = new GUIStyle { font = font, fontSize = size, fontStyle = FontStyle.Normal, alignment = anchor, richText = false };
         s.normal.textColor = color;
         s.clipping = TextClipping.Clip;
         s.name = "InventoryUI_" + baseSizes.Count;

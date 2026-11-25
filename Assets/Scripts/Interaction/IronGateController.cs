@@ -56,10 +56,6 @@ public class IronGateController : MonoBehaviour
     Vector3 gateCenter, gateNormal;
     Quaternion leftClosed, rightClosed;
     bool isOpen, inRange;
-    string notice;
-    float noticeUntil;
-    GUIStyle style;
-    Font font;
 
     void Start()
     {
@@ -105,7 +101,7 @@ public class IronGateController : MonoBehaviour
             if (!runHintShown && Vector3.Dot(player.transform.position - gateCenter, insideDir) >= runHintDistance)
             {
                 runHintShown = true;
-                ShowNotice("Shift : 달리기", runHintDuration);
+                GameHUD.Hint("Shift : 달리기      Ctrl : 웅크리기", runHintDuration); // 조작 안내
             }
             return;
         }
@@ -114,13 +110,14 @@ public class IronGateController : MonoBehaviour
         d.y = 0f;
         inRange = d.magnitude <= interactionDistance;
         if (!inRange) return;
+        GameHUD.Prompt("[E] 철문 열기");
 
         if (KeyPickup.ConsumedInteractionThisFrame) return; // 같은 E키로 열쇠를 주운 프레임
         if (Keyboard.current == null || !Keyboard.current.eKey.wasPressedThisFrame) return;
 
         if (!KeyPickup.HasKey2)
         {
-            ShowNotice("쇠사슬과 자물쇠로 단단히 잠겨 있다. 열쇠가 필요하다.");
+            GameHUD.Say("쇠사슬과 자물쇠로 단단히 잠겨 있다. 열쇠가 필요하다.", noticeDuration);
             return;
         }
 
@@ -129,7 +126,6 @@ public class IronGateController : MonoBehaviour
 
     void Unlock()
     {
-        ShowNotice("열쇠로 자물쇠를 풀었다.");
         Inventory.Remove(KeyPickup.ItemId); // 사용한 아이템은 사라진다
         gateOpened = true;
         Open(instant: false);
@@ -195,29 +191,6 @@ public class IronGateController : MonoBehaviour
             yield return null;
         }
     }
-
-    void ShowNotice(string message, float duration = -1f)
-    {
-        notice = message;
-        noticeUntil = Time.unscaledTime + (duration > 0f ? duration : noticeDuration);
-    }
-
-    void OnGUI()
-    {
-        if (SceneTravel.IsTraveling || InventoryUI.IsOpen) return;
-        string message = Time.unscaledTime < noticeUntil ? notice : (inRange && !isOpen ? "[E] 철문 열기" : null);
-        if (message == null) return;
-        if (style == null)
-        {
-            font = Font.CreateDynamicFontFromOSFont("Malgun Gothic", 22);
-            style = new GUIStyle(GUI.skin.box) { font = font, fontSize = 22, alignment = TextAnchor.MiddleCenter };
-            style.normal.textColor = Color.white;
-        }
-        // KeyPickup 안내문(화면 75% 높이)과 겹치지 않도록 조금 위에 표시
-        GUI.Box(new Rect((Screen.width - 560f) / 2f, Screen.height * 0.66f, 560f, 54f), message, style);
-    }
-
-    void OnDestroy() { if (font != null) Destroy(font); }
 
     static Transform FindByName(string objectName)
     {

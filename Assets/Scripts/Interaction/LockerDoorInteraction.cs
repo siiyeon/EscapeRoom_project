@@ -10,8 +10,6 @@ public class LockerDoorInteraction : MonoBehaviour
     [Min(0.1f)] public float interactionDistance = 2f;
     static LockerDoorInteraction instance;
     LockerDoorController focusedDoor;
-    GUIStyle style;
-    Font font;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     static void ResetInstance() { instance = null; }
@@ -66,23 +64,16 @@ public class LockerDoorInteraction : MonoBehaviour
     void OnGUI()
     {
         if (focusedDoor == null || SceneTravel.IsTraveling || KeyPickup.ConsumedInteractionThisFrame || InventoryUI.IsOpen) return;
-        if (style == null)
-        {
-            font = Font.CreateDynamicFontFromOSFont("Malgun Gothic", 20);
-            style = new GUIStyle(GUI.skin.box) { font = font, fontSize = 20, alignment = TextAnchor.MiddleCenter };
-            style.normal.textColor = Color.white;
-        }
         Color previous = GUI.color;
         GUI.color = Color.green;
         GUI.DrawTexture(new Rect(Screen.width * 0.5f - 2f, Screen.height * 0.5f - 2f, 4f, 4f), Texture2D.whiteTexture);
         GUI.color = previous;
-        string message = focusedDoor.IsMoving ? "문 이동 중..." : focusedDoor.IsOpen ? "[E] 사물함 닫기" : "[E] 사물함 열기";
-        GUI.Box(new Rect((Screen.width - 360f) / 2f, Screen.height * 0.85f, 360f, 48f), message, style);
+        if (Event.current.type == EventType.Repaint)
+            GameHUD.Prompt(focusedDoor.IsMoving ? "문 이동 중..." : focusedDoor.IsOpen ? "[E] 사물함 닫기" : "[E] 사물함 열기");
     }
 
     void OnDestroy()
     {
         if (instance == this) instance = null;
-        if (font != null) Destroy(font);
     }
 }
