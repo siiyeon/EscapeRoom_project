@@ -10,7 +10,27 @@ public static class PoliceGear
     public const string FlashlightId = "Flashlight";
     public const string BatteryId = "FlashlightBattery";
 
-    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    // 게임 시작 때, 그리고 귀신에게 잡혀 재시작(인벤토리 초기화)한 뒤 첫 씬에서 다시 준다.
+    // 교실을 오갈 때는 다시 주지 않는다 (사용한 배터리가 되살아나지 않게).
+    static int givenForReset = -1;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    static void ResetStatics() => givenForReset = -1;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    static void Init()
+    {
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    static void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
+    {
+        if (givenForReset == Inventory.ResetCount) return;
+        givenForReset = Inventory.ResetCount;
+        GiveStartingGear();
+    }
+
     static void GiveStartingGear()
     {
         InventoryItem flashlight = Give(FlashlightId, "Flashlight", "손전등", "Flashlight", "손전등 (Flashlight)",

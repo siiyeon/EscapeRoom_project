@@ -38,9 +38,13 @@ public static class Inventory
     public static IReadOnlyList<InventoryItem> Items => items;
     public static IReadOnlyList<InventoryItem> Gear => gear;
 
+    /// <summary>인벤토리가 비워진 횟수 (게임 시작·귀신에게 잡혀 재시작할 때 늘어남). 시작 장비를 다시 줄 때 사용.</summary>
+    public static int ResetCount { get; private set; }
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     internal static void ResetOnGameStart()
     {
+        ResetCount++;
         while (items.Count > 0) Remove(items[items.Count - 1].Id);
         while (gear.Count > 0) Remove(gear[gear.Count - 1].Id);
     }
