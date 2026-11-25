@@ -24,6 +24,10 @@ public class GhostPatrol : MonoBehaviour
     const float FloorTolerance = 0.15f;
     const float ChasePathInterval = 0.25f;
     const float BodyClearance = 0.01f;
+    const float CatchClearance = 0.07f;
+    const float CloseupDuration = 0.6f;
+    const float CloseupDistance = 0.52f;
+    const float CloseupFov = 32f;
     readonly List<Vector3> patrolPoints = new List<Vector3>();
     NavMeshPath path;
     NavMeshData navigation;
@@ -41,6 +45,14 @@ public class GhostPatrol : MonoBehaviour
     Texture2D heartbeatVignette;
     float heartbeatPhase;
     float heartbeatOpacity;
+    bool caughtPlayer;
+    float caughtAt;
+    Camera closeupCamera;
+    Vector3 cameraStart, cameraGoal, facePoint;
+    Quaternion cameraStartRotation;
+    float cameraStartFov;
+    Font defeatFont;
+    GrabArm leftGrabArm, rightGrabArm;
 
     // 여자 귀신 애니메이션: 멈춰 있으면 Idle, 움직이면 Walk (HorrorGirlImporter가 만든 애니메이터 사용)
     [Header("애니메이션")]
@@ -178,6 +190,7 @@ public class GhostPatrol : MonoBehaviour
 
     void Update()
     {
+        if (caughtPlayer) return;
         if (!IsReady || agent == null || !agent.isOnNavMesh) return;
         agent.isStopped = SceneTravel.IsTraveling;
         if (agent.isStopped)
@@ -233,6 +246,11 @@ public class GhostPatrol : MonoBehaviour
 
     void LateUpdate()
     {
+        if (caughtPlayer)
+        {
+            UpdateCloseup();
+            return;
+        }
         if (!IsReady || agent == null || !agent.isOnNavMesh) return;
 
         Vector3 start = transform.position;
@@ -245,6 +263,7 @@ public class GhostPatrol : MonoBehaviour
         if (agent.isStopped) destination = start;
         Vector3 movement = destination - start;
         float distance = movement.magnitude;
+        bool catchContact = false;
         if (distance > 0f && HasPlayerBody)
         {
             Bounds bodyBounds = body.bounds;
@@ -252,6 +271,7 @@ public class GhostPatrol : MonoBehaviour
             Bounds sweptBounds = bodyBounds;
             sweptBounds.Encapsulate(bodyBounds.min + movement);
             sweptBounds.Encapsulate(bodyBounds.max + movement);
+            if (chasing) sweptBounds.Expand(CatchClearance * 2f);
             if (sweptBounds.Intersects(playerBounds))
             {
                 Vector3 direction = movement / distance;
@@ -261,11 +281,12 @@ public class GhostPatrol : MonoBehaviour
                 Vector3 center = bodyBounds.center;
                 int playerLayer = 1 << playerBody.gameObject.layer;
                 foreach (RaycastHit hit in Physics.CapsuleCastAll(center - axis, center + axis, radius,
-                    direction, distance, playerLayer, QueryTriggerInteraction.Ignore))
+                    direction, distance + (chasing ? CatchClearance : 0f), playerLayer, QueryTriggerInteraction.Ignore))
                 {
                     if (hit.collider != playerBody) continue;
                     if (hit.distance == 0f && Vector3.Dot(direction, center - playerBounds.center) >= 0f) continue;
-                    destination = start + direction * Mathf.Max(0f, hit.distance - BodyClearance);
+                    catchContact = chasing;
+                    destination = start + direction * Mathf.Clamp(hit.distance - BodyClearance, 0f, distance);
                     break;
                 }
                 if (OverlapsPlayer(destination)) destination = start;
@@ -279,6 +300,130 @@ public class GhostPatrol : MonoBehaviour
             Physics.SyncTransforms();
         }
         UpdateAnimation(Time.deltaTime > 0f ? Vector3.Distance(start, destination) / Time.deltaTime : 0f);
+        if (chasing && (catchContact || (HasPlayerBody && body.bounds.Intersects(playerBody.bounds) && OverlapsPlayer(destination))))
+            CatchPlayer();
+    }
+
+    void CatchPlayer()
+    {
+        if (!SceneTravel.TryBeginDeath(player)) return;
+
+        caughtPlayer = true;
+        caughtAt = Time.unscaledTime;
+        agent.isStopped = true;
+        agent.updateRotation = false;
+        UpdateAnimation(0f);
+        if (animator != null) animator.speed = 0f;
+
+        Vector3 facing = player.transform.position - transform.position;
+        facing.y = 0f;
+        facing = facing.sqrMagnitude > 0.0001f ? facing.normalized : transform.forward;
+        transform.rotation = Quaternion.LookRotation(facing);
+
+        Transform head = FindBone(HumanBodyBones.Head);
+        Bounds bounds = body.bounds;
+        facePoint = head != null ? head.position + Vector3.up * (bounds.size.y * 0.07f)
+            : new Vector3(bounds.center.x, bounds.min.y + bounds.size.y * 0.89f, bounds.center.z);
+        leftGrabArm = new GrabArm(FindBone(HumanBodyBones.LeftUpperArm), FindBone(HumanBodyBones.LeftLowerArm),
+            FindBone(HumanBodyBones.LeftHand));
+        rightGrabArm = new GrabArm(FindBone(HumanBodyBones.RightUpperArm), FindBone(HumanBodyBones.RightLowerArm),
+            FindBone(HumanBodyBones.RightHand));
+
+        closeupCamera = player.cameraTransform != null ? player.cameraTransform.GetComponent<Camera>() : null;
+        if (closeupCamera == null) closeupCamera = player.GetComponentInChildren<Camera>();
+        if (closeupCamera == null) return;
+
+        cameraStart = closeupCamera.transform.position;
+        cameraStartRotation = closeupCamera.transform.rotation;
+        cameraStartFov = closeupCamera.fieldOfView;
+        cameraGoal = facePoint + facing * CloseupDistance;
+
+        var closeupLight = new GameObject("Ghost Closeup Light").AddComponent<Light>();
+        closeupLight.transform.SetParent(closeupCamera.transform, false);
+        closeupLight.type = LightType.Point;
+        closeupLight.range = 2f;
+        closeupLight.intensity = 1.5f;
+    }
+
+    void UpdateCloseup()
+    {
+        float elapsed = Time.unscaledTime - caughtAt;
+        AnimateGrabArm(leftGrabArm, -1f, elapsed);
+        AnimateGrabArm(rightGrabArm, 1f, elapsed - 0.06f);
+        if (closeupCamera == null) return;
+        float progress = Mathf.SmoothStep(0f, 1f, elapsed / CloseupDuration);
+        Vector3 cameraPosition = Vector3.Lerp(cameraStart, cameraGoal, progress);
+        Quaternion faceRotation = Quaternion.LookRotation(facePoint - cameraGoal);
+        closeupCamera.transform.SetPositionAndRotation(cameraPosition,
+            Quaternion.Slerp(cameraStartRotation, faceRotation, progress));
+        closeupCamera.fieldOfView = Mathf.Lerp(cameraStartFov, CloseupFov, progress);
+    }
+
+    Transform FindBone(HumanBodyBones bone)
+    {
+        if (animator != null && animator.isHuman)
+        {
+            Transform mapped = animator.GetBoneTransform(bone);
+            if (mapped != null) return mapped;
+        }
+
+        string name = bone.ToString();
+        foreach (Transform candidate in GetComponentsInChildren<Transform>())
+            if (candidate.name == name || candidate.name.EndsWith(":" + name, System.StringComparison.Ordinal))
+                return candidate;
+        return null;
+    }
+
+    void AnimateGrabArm(GrabArm arm, float side, float elapsed)
+    {
+        float reach = Mathf.SmoothStep(0f, 1f, elapsed / 0.28f);
+        float pull = Mathf.SmoothStep(0f, 1f, (elapsed - 0.28f) / 0.22f);
+        Vector3 outward = transform.right * side;
+        Vector3 target = facePoint + transform.forward * (0.38f - 0.08f * pull)
+            + outward * (0.30f - 0.05f * pull) - Vector3.up * (0.22f + 0.03f * pull);
+        arm.Reach(target, outward - Vector3.up, reach);
+    }
+
+    readonly struct GrabArm
+    {
+        readonly Transform shoulder, elbow, wrist;
+        readonly Quaternion shoulderRest, elbowRest;
+
+        public GrabArm(Transform shoulder, Transform elbow, Transform wrist)
+        {
+            this.shoulder = shoulder;
+            this.elbow = elbow;
+            this.wrist = wrist;
+            shoulderRest = shoulder != null ? shoulder.localRotation : Quaternion.identity;
+            elbowRest = elbow != null ? elbow.localRotation : Quaternion.identity;
+        }
+
+        public void Reach(Vector3 target, Vector3 bendDirection, float weight)
+        {
+            if (shoulder == null || elbow == null || wrist == null) return;
+            shoulder.localRotation = shoulderRest;
+            elbow.localRotation = elbowRest;
+
+            Vector3 upper = elbow.position - shoulder.position;
+            Vector3 lower = wrist.position - elbow.position;
+            float upperLength = upper.magnitude;
+            float lowerLength = lower.magnitude;
+            Vector3 reach = target - shoulder.position;
+            if (reach.sqrMagnitude < 0.0001f || upperLength < 0.001f || lowerLength < 0.001f) return;
+
+            Vector3 axis = reach.normalized;
+            float distance = Mathf.Clamp(reach.magnitude, Mathf.Abs(upperLength - lowerLength) + 0.001f,
+                upperLength + lowerLength - 0.001f);
+            float alongAxis = (upperLength * upperLength - lowerLength * lowerLength + distance * distance) / (2f * distance);
+            float bend = Mathf.Sqrt(Mathf.Max(0f, upperLength * upperLength - alongAxis * alongAxis));
+            Vector3 desiredUpper = axis * alongAxis + Vector3.ProjectOnPlane(bendDirection, axis).normalized * bend;
+
+            shoulder.rotation = Quaternion.FromToRotation(upper, desiredUpper) * shoulder.rotation;
+            Vector3 wristGoal = shoulder.position + axis * distance;
+            elbow.rotation = Quaternion.FromToRotation(wrist.position - elbow.position, wristGoal - elbow.position) * elbow.rotation;
+            shoulder.localRotation = Quaternion.Slerp(shoulderRest, shoulder.localRotation, weight);
+            elbow.localRotation = Quaternion.Slerp(elbowRest, elbow.localRotation, weight);
+        }
     }
 
     void UpdateAnimation(float moving)
@@ -291,7 +436,9 @@ public class GhostPatrol : MonoBehaviour
     void UpdateSpeed()
     {
         float patrolSpeed = player != null ? player.walkSpeed * walkingSpeedRatio : fallbackSpeed;
-        agent.speed = Mathf.Max(0.1f, patrolSpeed * (chasing ? chaseSpeedMultiplier : 1f));
+        float speed = chasing ? patrolSpeed * chaseSpeedMultiplier : patrolSpeed;
+        if (chasing && player != null) speed = Mathf.Max(speed, player.sprintSpeed * 1.05f);
+        agent.speed = Mathf.Max(0.1f, speed);
     }
 
     void UpdateChase()
@@ -332,7 +479,7 @@ public class GhostPatrol : MonoBehaviour
         }
 
         chasing = true;
-        agent.stoppingDistance = 0.85f;
+        agent.stoppingDistance = 0.05f;
     }
 
     void StopChase()
@@ -362,6 +509,11 @@ public class GhostPatrol : MonoBehaviour
 
     void OnGUI()
     {
+        if (caughtPlayer)
+        {
+            DrawDefeatScreen();
+            return;
+        }
         if (Event.current.type != EventType.Repaint || heartbeatOpacity < 0.005f
             || SceneTravel.IsTraveling || InventoryUI.IsOpen)
             return;
@@ -389,6 +541,29 @@ public class GhostPatrol : MonoBehaviour
         GUI.color = new Color(1f, 1f, 1f, heartbeatOpacity);
         GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), heartbeatVignette);
         GUI.color = previousColor;
+    }
+
+    void DrawDefeatScreen()
+    {
+        if (Time.unscaledTime - caughtAt < CloseupDuration) return;
+
+        GUI.depth = -1001;
+        if (defeatFont == null)
+            defeatFont = Font.CreateDynamicFontFromOSFont("Malgun Gothic", 32);
+
+        float scale = Mathf.Clamp(Screen.height / 720f, 0.6f, 2f);
+        var label = new GUIStyle(GUI.skin.label)
+        {
+            font = defeatFont, fontSize = Mathf.RoundToInt(32f * scale),
+            alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold
+        };
+        var button = new GUIStyle(GUI.skin.button) { font = defeatFont, fontSize = Mathf.RoundToInt(22f * scale) };
+        float width = 220f * scale;
+        float x = (Screen.width - width) * 0.5f;
+        float y = Screen.height * 0.75f;
+        GUI.Label(new Rect(x, y, width, 46f * scale), "붙잡혔습니다", label);
+        if (GUI.Button(new Rect(x, y + 51f * scale, width, 48f * scale), "다시 하기", button))
+            SceneTravel.RestartAfterDeath();
     }
 
     void ChooseDestination()
@@ -452,6 +627,7 @@ public class GhostPatrol : MonoBehaviour
     void OnDestroy()
     {
         if (heartbeatVignette != null) Destroy(heartbeatVignette);
+        if (defeatFont != null) Destroy(defeatFont);
         if (navigationInstance.valid) navigationInstance.Remove();
         if (navigation != null) Destroy(navigation);
     }

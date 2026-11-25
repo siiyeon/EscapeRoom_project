@@ -12,15 +12,15 @@ public class KeyPickup : MonoBehaviour
     public const string ItemId = "GateKey"; // 인벤토리 아이템 id
     static int pickupFrame = -1;
     [Min(0.1f)] public float interactionDistance = 1.8f;
-    [Range(5f, 90f)] public float viewAngle = 20f; // 화면 가운데에서 이 각도 안에 열쇠가 보이면 집을 수 있음
     [Min(0.1f)] public float noticeDuration = 2.5f;
     bool collected, focused;
+    CharacterController playerBody;
     float noticeUntil;
     GUIStyle style;
     Font font;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    static void ResetInventory() { HasKey2 = false; pickupFrame = -1; }
+    internal static void ResetInventory() { HasKey2 = false; pickupFrame = -1; }
 
     // Also covers scenes already open in the editor before the scene file was updated.
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -70,52 +70,65 @@ public class KeyPickup : MonoBehaviour
         if (HasKey2) HideKey();
     }
 
+    void Start()
+    {
+        var boundary = FindFirstObjectByType<OutsideBoundary>();
+        if (collected || boundary == null || boundary.gameObject.scene != gameObject.scene) return;
+
+        // Keep the pickup outside the fence volume even in an older copy of the school scene.
+        Transform perimeter = boundary.transform;
+        Vector3 center = GetComponent<BoxCollider>().bounds.center;
+        float outsideDistance = Vector3.Dot(center - perimeter.position, perimeter.forward);
+        if (outsideDistance >= 0.45f) return;
+        transform.position += perimeter.forward * (0.45f - outsideDistance);
+        Physics.SyncTransforms();
+    }
+
     void Update()
     {
         focused = false;
         if (collected || SceneTravel.IsTraveling || InventoryUI.IsOpen) return;
         if (HasKey2) { HideKey(); return; }
-        Camera view = Camera.main;
-        if (view == null) return;
-        var player = view.GetComponentInParent<PlayerController>();
-        if (player == null || !player.isActiveAndEnabled) return;
-        focused = CanReach(view, player.transform);
+        if (playerBody == null) playerBody = GameObject.FindWithTag("Player")?.GetComponent<CharacterController>();
+        if (playerBody == null || !playerBody.enabled || !playerBody.gameObject.activeInHierarchy) return;
+        focused = CanReach(playerBody);
         if (!focused || Keyboard.current == null || !Keyboard.current.eKey.wasPressedThisFrame) return;
         pickupFrame = Time.frameCount;
-        HasKey2 = true;
-        noticeUntil = Time.unscaledTime + noticeDuration;
-        // 인벤토리에 넣기 (아이콘은 숨기기 전에 열쇠 모델을 찍어서 만든다)
-        Inventory.Add(new InventoryItem
+        var item = new InventoryItem
         {
             Id = ItemId,
             SlotName = "열쇠",
             SlotSubName = "Key",
             Title = "정문 열쇠 (Key)",
             Description = "철문의 자물쇠를 열 수 있을 것 같다.",
-            Icon = ItemIconRenderer.Render(gameObject),
             OnUse = IronGateController.TryUseKey, // 철문 앞에서 [마우스 좌클릭]으로 사용
-        });
+        };
+        if (!Inventory.Add(item)) return;
+        HasKey2 = true;
+        noticeUntil = Time.unscaledTime + noticeDuration;
+        try { item.Icon = ItemIconRenderer.Render(gameObject); }
+        catch (System.Exception error) { Debug.LogWarning("[KeyPickup] " + error.Message, this); }
         HideKey();
     }
 
-    // 열쇠가 가까이 있고 화면 가운데 근처에 보이기만 하면 집을 수 있다 (정확히 조준할 필요 없음)
-    bool CanReach(Camera view, Transform player)
+    bool CanReach(CharacterController player)
     {
-        Vector3 eye = view.transform.position;
-        Vector3 keyCenter = transform.TransformPoint(GetComponent<BoxCollider>().center);
-        Vector3 toKey = keyCenter - eye;
-        if (toKey.magnitude > interactionDistance) return false;
-        if (Vector3.Angle(view.transform.forward, toKey) > viewAngle) return false;
-        if (toKey.magnitude < 0.8f) return true; // 바로 앞이면 시야 검사 생략
+        Bounds body = player.bounds;
+        Vector3 keyCenter = GetComponent<BoxCollider>().bounds.center;
+        Vector3 offset = keyCenter - body.center;
+        offset.y = 0f;
+        if (offset.sqrMagnitude > interactionDistance * interactionDistance ||
+            keyCenter.y < body.min.y - 0.35f || keyCenter.y > body.max.y + 0.35f) return false;
 
         // 벽 너머 열쇠는 집지 않도록: 열쇠 중심이나 위쪽 중 하나라도 가리는 것 없이 보이면 OK
+        Vector3 start = body.center;
         Vector3[] targets = { keyCenter, keyCenter + Vector3.up * 0.1f };
         foreach (Vector3 target in targets)
         {
             bool blocked = false;
-            foreach (var hit in Physics.RaycastAll(eye, target - eye, Vector3.Distance(eye, target), ~0, QueryTriggerInteraction.Ignore))
+            foreach (var hit in Physics.RaycastAll(start, target - start, Vector3.Distance(start, target), ~0, QueryTriggerInteraction.Ignore))
             {
-                if (hit.collider.transform.IsChildOf(player) || hit.collider.transform.IsChildOf(transform)) continue;
+                if (hit.collider.transform.IsChildOf(player.transform) || hit.collider.transform.IsChildOf(transform)) continue;
                 blocked = true;
                 break;
             }

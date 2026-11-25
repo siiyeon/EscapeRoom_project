@@ -11,14 +11,16 @@ using UnityEngine.SceneManagement;
 public class EntranceShutter : MonoBehaviour
 {
     public string curtainName = "Shutter_Curtain";
-    public string insideMarkerName = "Door_1F_C08"; // 건물 안쪽 방향 판단용
+    public string insideMarkerName = "Door_1F_C08";
     public float dropDistanceInside = 0.8f;         // 셔터를 지나 이만큼 들어오면 떨어짐 (셔터에 끼지 않게)
-    public float dropDuration = 0.5f;
+    const float SourceFrameRate = 24f;
+    const float ImpactFrame = 10f;
+    const float SettleFrame = 18f;
 
     // 교실에 다녀와서 학교 씬이 다시 로드돼도 닫힌 상태 유지
     static bool closedUntilEnding;
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    static void ResetOnGameStart() => closedUntilEnding = false;
+    internal static void ResetOnGameStart() => closedUntilEnding = false;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     static void Init()
@@ -42,11 +44,13 @@ public class EntranceShutter : MonoBehaviour
     }
 
     Transform curtain;
-    Renderer[] renderers;
+    SkinnedMeshRenderer curtainRenderer;
+    int openShapeIndex;
     Collider[] colliders;
-    Vector3 downPosition;     // 닫힌(내려온) 위치 = 모델 원래 위치
-    float height;             // 셔터 판 높이 (이만큼 위에서 떨어진다)
-    Vector3 planePoint, insideDir;
+    Bounds closedBounds;
+    float openLift;
+    Vector3 insideDir;
+    CharacterController player;
     bool closed;
 
     void Start()
@@ -54,57 +58,120 @@ public class EntranceShutter : MonoBehaviour
         GameObject go = GameObject.Find(curtainName);
         if (go == null) { enabled = false; return; }
         curtain = go.transform;
-        renderers = go.GetComponentsInChildren<Renderer>(true);
+        curtainRenderer = go.GetComponentInChildren<SkinnedMeshRenderer>(true);
+        openShapeIndex = FindOpenShape(curtainRenderer != null ? curtainRenderer.sharedMesh : null);
+        if (openShapeIndex < 0)
+        {
+            Debug.LogWarning("[EntranceShutter] Could not find the Open blend shape on the shutter curtain.", this);
+            enabled = false;
+            return;
+        }
         colliders = go.GetComponentsInChildren<Collider>(true);
 
-        Bounds b = WorldBounds(renderers, curtain.position);
-        downPosition = curtain.position;
-        height = Mathf.Max(b.size.y, 0.5f);
-        planePoint = b.center;
+        curtainRenderer.updateWhenOffscreen = true;
+        var baked = new Mesh();
+        SetPose(0f);
+        closedBounds = BakeWorldBounds(baked);
+        SetPose(1f);
+        openLift = BakeWorldBounds(baked).min.y - closedBounds.min.y;
+        Destroy(baked);
+
+        var floor = GameObject.Find("Floor_1F")?.GetComponentInChildren<Collider>();
+        if (floor != null && floor.Raycast(new Ray(closedBounds.center, Vector3.down), out RaycastHit floorHit, closedBounds.size.y))
+        {
+            float floorOffset = floorHit.point.y - closedBounds.min.y;
+            curtain.position += Vector3.up * floorOffset;
+            closedBounds.center += Vector3.up * floorOffset;
+        }
 
         // 셔터 면에 수직인 방향 = 셔터가 얇은 축, 그중 건물 안쪽
-        insideDir = b.size.x < b.size.z ? Vector3.right : Vector3.forward;
-        GameObject inside = GameObject.Find(insideMarkerName);
-        if (inside != null && Vector3.Dot(inside.transform.position - planePoint, insideDir) < 0f) insideDir = -insideDir;
+        insideDir = closedBounds.size.x < closedBounds.size.z ? Vector3.right : Vector3.forward;
+        GameObject inside = GameObject.Find(insideMarkerName) ?? GameObject.Find("Shutter_Trigger");
+        if (inside != null && Vector3.Dot(inside.transform.position - closedBounds.center, insideDir) < 0f) insideDir = -insideDir;
 
         closed = closedUntilEnding;
-        SetVisible(closed);
+        SetPose(closed ? 0f : 1f);
+        SetCollision(closed);
     }
 
-    void Update()
+    void LateUpdate()
     {
         if (closed || curtain == null || SceneTravel.IsTraveling) return;
-        GameObject player = GameObject.FindWithTag("Player");
-        if (player == null) return;
-        if (Vector3.Dot(player.transform.position - planePoint, insideDir) < dropDistanceInside) return;
+        if (player == null) player = GameObject.FindWithTag("Player")?.GetComponent<CharacterController>();
+        if (player == null || !player.enabled) return;
 
-        closed = closedUntilEnding = true;
-        Debug.Log("[EntranceShutter] 플레이어가 들어와서 현관 셔터가 내려옵니다.");
+        Bounds playerBounds = player.bounds;
+        Vector3 center = playerBounds.center;
+        float depth = SignedDepth(center);
+        float clearance = Mathf.Abs(insideDir.x) * (playerBounds.extents.x + closedBounds.extents.x)
+                        + Mathf.Abs(insideDir.z) * (playerBounds.extents.z + closedBounds.extents.z);
+        float triggerStart = Mathf.Max(dropDistanceInside, clearance + 0.05f);
+        if (depth < triggerStart || depth > triggerStart + 2f) return;
+
+        // Project the player's capsule onto the shutter plane to check the doorway's width and height.
+        Bounds projectedPlayer = playerBounds;
+        projectedPlayer.center = center - insideDir * depth;
+        if (!closedBounds.Intersects(projectedPlayer)) return;
+
+        closed = true;
         StartCoroutine(Drop());
     }
 
+    float SignedDepth(Vector3 point) => Vector3.Dot(point - closedBounds.center, insideDir);
+
     IEnumerator Drop()
     {
-        // 셔터 판을 보이게 하고 위(감겨 있던 곳)에서 원래 위치까지 떨어뜨린다. 충돌은 다 내려온 뒤에 켠다.
-        foreach (Renderer r in renderers) r.enabled = true;
-        float t = 0f;
-        while (t < 1f)
+        float frame = 0f;
+        bool impacted = false;
+        while (frame < SettleFrame)
         {
-            t = Mathf.Min(1f, t + Time.deltaTime / dropDuration);
-            float e = t * t; // 점점 빨라지며 떨어짐
-            curtain.position = downPosition + Vector3.up * height * (1f - e);
+            float nextFrame = Mathf.Min(frame + Time.deltaTime * SourceFrameRate, impacted ? SettleFrame : ImpactFrame);
+            float openness = SampleSlam(nextFrame);
+            if (!impacted && player != null && player.enabled)
+            {
+                Bounds playerBounds = player.bounds;
+                if (SignedDepth(playerBounds.center) < 0f ||
+                    (playerBounds.max.y >= closedBounds.min.y + openLift * openness && closedBounds.Intersects(playerBounds)))
+                {
+                    closed = false;
+                    SetPose(1f);
+                    yield break;
+                }
+            }
+
+            frame = nextFrame;
+            SetPose(openness);
+            if (!impacted && frame >= ImpactFrame)
+            {
+                impacted = true;
+                SetCollision(true);
+                AudioClip impact = Resources.Load<AudioClip>("Audio/EntranceShutterClose");
+                if (impact != null) AudioSource.PlayClipAtPoint(impact, closedBounds.center);
+            }
+            if (frame >= SettleFrame) break;
             yield return null;
         }
-        curtain.position = downPosition;
-        foreach (Collider c in colliders) c.enabled = true;
-        Physics.SyncTransforms();
+        closedUntilEnding = true;
     }
 
-    void SetVisible(bool down)
+    // Shutter_Slam animates the Open shape key in Blender. Begin at its first moving key (frame 10).
+    static float SampleSlam(float frame)
     {
-        curtain.position = downPosition;
-        foreach (Renderer r in renderers) r.enabled = down;
-        foreach (Collider c in colliders) c.enabled = down;
+        if (frame <= ImpactFrame) return 1f - Mathf.Pow(frame / ImpactFrame, 2f);
+        if (frame <= 13f) return Mathf.SmoothStep(0f, 0.06f, (frame - ImpactFrame) / 3f);
+        if (frame <= 15f) return Mathf.SmoothStep(0.06f, 0f, (frame - 13f) / 2f);
+        if (frame <= 17f) return Mathf.SmoothStep(0f, 0.018f, (frame - 15f) / 2f);
+        return Mathf.SmoothStep(0.018f, 0f, frame - 17f);
+    }
+
+    void SetPose(float openness)
+    {
+        curtainRenderer.SetBlendShapeWeight(openShapeIndex, openness * 100f);
+    }
+
+    void SetCollision(bool enabled)
+    {
+        foreach (Collider c in colliders) c.enabled = enabled;
         Physics.SyncTransforms();
     }
 
@@ -113,14 +180,29 @@ public class EntranceShutter : MonoBehaviour
     {
         StopAllCoroutines();
         closed = closedUntilEnding = false;
-        SetVisible(false);
+        if (curtainRenderer == null || openShapeIndex < 0) return;
+        SetCollision(false);
+        SetPose(1f);
     }
 
-    static Bounds WorldBounds(Renderer[] rs, Vector3 fallback)
+    static int FindOpenShape(Mesh mesh)
     {
-        if (rs.Length == 0) return new Bounds(fallback, Vector3.zero);
-        Bounds b = rs[0].bounds;
-        for (int i = 1; i < rs.Length; i++) b.Encapsulate(rs[i].bounds);
-        return b;
+        if (mesh == null) return -1;
+        for (int i = 0; i < mesh.blendShapeCount; i++)
+        {
+            string name = mesh.GetBlendShapeName(i);
+            if (name == "Open" || name.EndsWith(".Open", System.StringComparison.Ordinal)) return i;
+        }
+        return -1;
+    }
+
+    Bounds BakeWorldBounds(Mesh baked)
+    {
+        curtainRenderer.BakeMesh(baked);
+        Vector3[] vertices = baked.vertices;
+        Transform meshTransform = curtainRenderer.transform;
+        var bounds = new Bounds(meshTransform.TransformPoint(vertices[0]), Vector3.zero);
+        for (int i = 1; i < vertices.Length; i++) bounds.Encapsulate(meshTransform.TransformPoint(vertices[i]));
+        return bounds;
     }
 }

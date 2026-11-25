@@ -26,7 +26,7 @@ public class DoubleDoorController : MonoBehaviour
     private static bool lockedUntilEnding = false;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    static void ResetOnGameStart() => lockedUntilEnding = false;
+    internal static void ResetOnGameStart() => lockedUntilEnding = false;
 
     private Vector3 doorNormal;      // 문 면에 수직 (수평)
     private float insideSign = 0f;   // doorNormal 기준 건물 안쪽이 +1인지 -1인지 (0 = 아직 모름)

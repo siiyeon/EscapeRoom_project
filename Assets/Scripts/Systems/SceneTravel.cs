@@ -17,6 +17,7 @@ public class SceneTravel : MonoBehaviour
     static SceneTravel runner;
     static GameObject persistentPlayer;
     static Texture2D blackTexture;
+    static bool playerDead, restarting;
 
     float fadeAlpha;
 
@@ -24,6 +25,7 @@ public class SceneTravel : MonoBehaviour
     static void Init()
     {
         IsTraveling = false;
+        playerDead = restarting = false;
         runner = null;
         persistentPlayer = null;
         SceneManager.sceneLoaded -= OnSceneLoaded;
@@ -33,6 +35,11 @@ public class SceneTravel : MonoBehaviour
     // 씬이 로드될 때마다 플레이어를 하나만 남긴다
     static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        if (restarting)
+        {
+            restarting = playerDead = IsTraveling = false;
+            Time.timeScale = 1f;
+        }
         GameObject[] players = GameObject.FindGameObjectsWithTag("Player");
 
         if (persistentPlayer == null && players.Length > 0)
@@ -53,6 +60,39 @@ public class SceneTravel : MonoBehaviour
 
         if (persistentPlayer == null)
             Debug.LogWarning("[SceneTravel] 'Player' 태그가 붙은 플레이어가 없습니다. 이 씬에서 바로 테스트하려면 플레이어를 넣고 태그를 Player로 설정하세요.");
+    }
+
+    internal static bool TryBeginDeath(PlayerController player)
+    {
+        if (IsTraveling || InventoryUI.IsOpen || player == null) return false;
+        playerDead = IsTraveling = true;
+        player.enabled = false;
+        Time.timeScale = 0f;
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+        return true;
+    }
+
+    internal static void RestartAfterDeath()
+    {
+        if (!playerDead || restarting) return;
+        restarting = true;
+
+        KeyPickup.ResetInventory();
+        IronGateController.ResetOnGameStart();
+        DoubleDoorController.ResetOnGameStart();
+        EntranceShutter.ResetOnGameStart();
+        Inventory.ResetOnGameStart();
+        Mission.ResetOnGameStart();
+
+        if (persistentPlayer != null)
+        {
+            persistentPlayer.SetActive(false);
+            Destroy(persistentPlayer);
+            persistentPlayer = null;
+        }
+        AudioListener.pause = false;
+        SceneManager.LoadScene(0, LoadSceneMode.Single);
     }
 
     /// <summary>sceneName 씬으로 이동해서 doorId 문 앞에 도착한다.</summary>

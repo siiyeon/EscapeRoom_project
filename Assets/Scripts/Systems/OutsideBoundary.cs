@@ -9,6 +9,7 @@ using UnityEngine.SceneManagement;
 /// </summary>
 public class OutsideBoundary : MonoBehaviour
 {
+    internal const float WallHeight = 6f;
     [Header("크기 (울타리 한 칸 = 약 2.83m)")]
     public float fencePanelWidth = 2.83f;
     public int sidePanels = 2;     // 철문 양옆으로 울타리 몇 칸까지 갈 수 있는지
@@ -23,6 +24,7 @@ public class OutsideBoundary : MonoBehaviour
     public string backMessage = "학교에 들어가야 할 것만 같아...";
 
     float sideLimit, backLimit;
+    float gateOpeningMin, gateOpeningMax;
     int nearWall; // 0 = 벽 근처 아님, 1 = 옆 벽, 2 = 뒤 벽 (벽에 새로 다가갈 때만 랜덤 멘트를 다시 고른다)
     Transform player;
     string notice;
@@ -55,7 +57,14 @@ public class OutsideBoundary : MonoBehaviour
         var go = new GameObject("[OutsideBoundary]");
         SceneManager.MoveGameObjectToScene(go, scene);
         go.transform.SetPositionAndRotation(center, Quaternion.LookRotation(outward));
-        go.AddComponent<OutsideBoundary>();
+        var boundary = go.AddComponent<OutsideBoundary>();
+        Vector3 localRight = go.transform.right;
+        float leftCenter = go.transform.InverseTransformPoint(lb.center).x;
+        float rightCenter = go.transform.InverseTransformPoint(rb.center).x;
+        float leftExtent = Mathf.Abs(localRight.x) * lb.extents.x + Mathf.Abs(localRight.z) * lb.extents.z;
+        float rightExtent = Mathf.Abs(localRight.x) * rb.extents.x + Mathf.Abs(localRight.z) * rb.extents.z;
+        boundary.gateOpeningMin = Mathf.Min(leftCenter - leftExtent, rightCenter - rightExtent);
+        boundary.gateOpeningMax = Mathf.Max(leftCenter + leftExtent, rightCenter + rightExtent);
     }
 
     void Start()
@@ -64,10 +73,19 @@ public class OutsideBoundary : MonoBehaviour
         backLimit = backPanels * fencePanelWidth;
 
         // 로컬 좌표: x = 철문을 따라 옆으로, z = 학교 반대쪽(바깥)으로
-        const float height = 6f, thick = 0.5f;
+        const float height = WallHeight, thick = 0.5f;
         AddWall("Wall_Left", new Vector3(-sideLimit - thick / 2f, height / 2f, backLimit / 2f), new Vector3(thick, height, backLimit + thick));
         AddWall("Wall_Right", new Vector3(sideLimit + thick / 2f, height / 2f, backLimit / 2f), new Vector3(thick, height, backLimit + thick));
         AddWall("Wall_Back", new Vector3(0f, height / 2f, backLimit + thick / 2f), new Vector3(sideLimit * 2f + thick * 2f, height, thick));
+        AddFenceWall(-sideLimit - thick, gateOpeningMin);
+        AddFenceWall(gateOpeningMax, sideLimit + thick);
+    }
+
+    void AddFenceWall(float min, float max)
+    {
+        if (max <= min) return;
+        AddWall("Wall_Fence", new Vector3((min + max) / 2f, WallHeight / 2f, 0f),
+            new Vector3(max - min, WallHeight, 0.5f));
     }
 
     void AddWall(string wallName, Vector3 localCenter, Vector3 size)

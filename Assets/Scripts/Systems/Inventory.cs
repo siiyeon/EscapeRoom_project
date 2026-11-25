@@ -39,7 +39,11 @@ public static class Inventory
     public static IReadOnlyList<InventoryItem> Gear => gear;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    static void ResetOnGameStart() { items.Clear(); gear.Clear(); }
+    internal static void ResetOnGameStart()
+    {
+        while (items.Count > 0) Remove(items[items.Count - 1].Id);
+        while (gear.Count > 0) Remove(gear[gear.Count - 1].Id);
+    }
 
     public static bool Has(string id) => items.Exists(i => i.Id == id) || gear.Exists(i => i.Id == id);
 
@@ -64,7 +68,7 @@ public static class Inventory
         if (item == null) return false;
         items.Remove(item);
         gear.Remove(item);
-        if (item.Icon is RenderTexture rt) { rt.Release(); UnityEngine.Object.Destroy(rt); }
+        if (item.Icon is RenderTexture rt && rt != null) { rt.Release(); UnityEngine.Object.Destroy(rt); }
         return true;
     }
 }
@@ -79,7 +83,7 @@ public static class Mission
     public static string Current { get; private set; } = Initial;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    static void ResetOnGameStart() => Current = Initial;
+    internal static void ResetOnGameStart() => Current = Initial;
 
     public static void Set(string mission) => Current = mission;
 }

@@ -23,11 +23,12 @@ public class IronGateController : MonoBehaviour
     public float openSpeed = 0.8f;
     public float noticeDuration = 2.5f;
 
-    // 교실에 다녀와서 학교 씬이 다시 로드돼도 열린 상태 유지
+    // Preserve the unlocked and closed states when returning from a classroom.
     static bool gateOpened;
+    static bool gateClosedAfterEntry;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    static void ResetOnGameStart() { gateOpened = false; runHintShown = false; }
+    internal static void ResetOnGameStart() { gateOpened = gateClosedAfterEntry = runHintShown = false; }
 
     [Header("철문을 지나면 달리기 안내")]
     public float runHintDistance = 2f;   // 철문을 지나 학교 쪽으로 몇 m 들어오면 안내
@@ -55,7 +56,10 @@ public class IronGateController : MonoBehaviour
     GameObject chain, padlock;
     Vector3 gateCenter, gateNormal;
     Quaternion leftClosed, rightClosed;
-    bool isOpen, inRange;
+    Quaternion leftOpen, rightOpen;
+    BoxCollider passageBlocker;
+    float gateSweepDepth;
+    bool isOpen, isMoving, inRange;
     string notice;
     float noticeUntil;
     GUIStyle style;
@@ -81,6 +85,17 @@ public class IronGateController : MonoBehaviour
         axis.Normalize();
         gateCenter = (lb.center + rb.center) / 2f;
         gateNormal = Vector3.Cross(Vector3.up, axis);
+        gateSweepDepth = 2f * Mathf.Max(ExtentAlong(lb, axis), ExtentAlong(rb, axis));
+
+        Bounds passage = lb;
+        passage.Encapsulate(rb);
+        var blocker = new GameObject("Gate Passage Blocker");
+        blocker.transform.SetParent(transform, false);
+        blocker.transform.SetPositionAndRotation(
+            new Vector3(passage.center.x, passage.min.y + OutsideBoundary.WallHeight * 0.5f, passage.center.z),
+            Quaternion.LookRotation(gateNormal));
+        passageBlocker = blocker.AddComponent<BoxCollider>();
+        passageBlocker.size = new Vector3(2f * ExtentAlong(passage, axis) + 0.02f, OutsideBoundary.WallHeight, 0.5f);
 
         // 각 문짝의 바깥쪽 끝(기둥 쪽)을 경첩으로 사용
         leftHinge = CreateHinge("Hinge_" + left.name, left, lb.center - axis * ExtentAlong(lb, axis));
@@ -88,7 +103,11 @@ public class IronGateController : MonoBehaviour
         leftClosed = leftHinge.localRotation;
         rightClosed = rightHinge.localRotation;
 
-        if (gateOpened) Open(instant: true);
+        if (gateOpened)
+        {
+            RemoveLock();
+            if (!gateClosedAfterEntry) Open(instant: true);
+        }
     }
 
     void Update()
@@ -99,13 +118,18 @@ public class IronGateController : MonoBehaviour
         GameObject player = GameObject.FindWithTag("Player");
         if (player == null) return;
 
-        if (isOpen)
+        if (gateOpened)
         {
             // 철문을 지나 학교 쪽으로 2m 들어오면 달리기 안내 (게임 중 한 번만)
-            if (!runHintShown && Vector3.Dot(player.transform.position - gateCenter, insideDir) >= runHintDistance)
+            if (isOpen && !runHintShown && Vector3.Dot(player.transform.position - gateCenter, insideDir) >= runHintDistance)
             {
                 runHintShown = true;
                 ShowNotice("Shift : 달리기", runHintDuration);
+            }
+            if (isOpen && !isMoving)
+            {
+                var body = player.GetComponent<CharacterController>();
+                if (PlayerPastGateSweep(body)) StartCoroutine(Close(body));
             }
             return;
         }
@@ -132,6 +156,7 @@ public class IronGateController : MonoBehaviour
         ShowNotice("열쇠로 자물쇠를 풀었다.");
         Inventory.Remove(KeyPickup.ItemId); // 사용한 아이템은 사라진다
         gateOpened = true;
+        RemoveLock();
         Open(instant: false);
     }
 
@@ -142,7 +167,7 @@ public class IronGateController : MonoBehaviour
     public static bool TryUseKey()
     {
         IronGateController gate = FindAnyObjectByType<IronGateController>();
-        if (gate == null || gate.isOpen || !KeyPickup.HasKey2) return false;
+        if (gate == null || gateOpened || !KeyPickup.HasKey2) return false;
         GameObject player = GameObject.FindWithTag("Player");
         if (player == null) return false;
         Vector3 d = player.transform.position - gate.gateCenter;
@@ -152,12 +177,14 @@ public class IronGateController : MonoBehaviour
         return true;
     }
 
-    void Open(bool instant)
+    void RemoveLock()
     {
-        isOpen = true;
         if (chain != null) chain.SetActive(false);
         if (padlock != null) padlock.SetActive(false);
+    }
 
+    void Open(bool instant)
+    {
         // 학교 안쪽으로 열린다
         float side = -1f;
         GameObject inside = string.IsNullOrEmpty(insideMarkerName) ? null : GameObject.Find(insideMarkerName);
@@ -167,32 +194,75 @@ public class IronGateController : MonoBehaviour
 
         // 왼쪽 문짝 끝은 +axis 방향 → Y축 +각도 회전 시 +gateNormal 쪽으로 이동. 오른쪽은 거울 대칭.
         float leftAngle = -openAngle * side;
-        Quaternion leftOpen = leftClosed * Quaternion.Euler(0f, leftAngle, 0f);
-        Quaternion rightOpen = rightClosed * Quaternion.Euler(0f, -leftAngle, 0f);
+        leftOpen = leftClosed * Quaternion.Euler(0f, leftAngle, 0f);
+        rightOpen = rightClosed * Quaternion.Euler(0f, -leftAngle, 0f);
 
         if (instant)
         {
             leftHinge.localRotation = leftOpen;
             rightHinge.localRotation = rightOpen;
+            passageBlocker.enabled = false;
+            isOpen = true;
+            Physics.SyncTransforms();
         }
         else
         {
             AudioClip openingSound = Resources.Load<AudioClip>("Audio/IronGateOpen");
             if (openingSound != null) AudioSource.PlayClipAtPoint(openingSound, gateCenter);
-            StartCoroutine(Swing(leftOpen, rightOpen));
+            StartCoroutine(FinishOpening());
         }
     }
 
-    IEnumerator Swing(Quaternion leftOpen, Quaternion rightOpen)
+    bool PlayerPastGateSweep(CharacterController player)
     {
+        if (player == null || !player.enabled) return false;
+        Bounds body = player.bounds;
+        return Vector3.Dot(body.center - gateCenter, insideDir) - ExtentAlong(body, insideDir) > gateSweepDepth + 0.1f;
+    }
+
+    IEnumerator FinishOpening()
+    {
+        isMoving = true;
+        yield return Swing(leftOpen, rightOpen);
+        passageBlocker.enabled = false;
+        Physics.SyncTransforms();
+        isOpen = true;
+        isMoving = false;
+    }
+
+    IEnumerator Close(CharacterController player)
+    {
+        isMoving = true;
+        yield return Swing(leftClosed, rightClosed, player);
+        if (Quaternion.Angle(leftHinge.localRotation, leftClosed) > 0.01f)
+        {
+            yield return FinishOpening();
+            yield break;
+        }
+
+        passageBlocker.enabled = true;
+        Physics.SyncTransforms();
+        isOpen = false;
+        isMoving = false;
+        gateClosedAfterEntry = true;
+        AudioClip closingSound = Resources.Load<AudioClip>("Audio/EntranceShutterClose");
+        if (closingSound != null) AudioSource.PlayClipAtPoint(closingSound, gateCenter);
+    }
+
+    IEnumerator Swing(Quaternion leftTarget, Quaternion rightTarget, CharacterController closingNearPlayer = null)
+    {
+        Quaternion leftStart = leftHinge.localRotation;
+        Quaternion rightStart = rightHinge.localRotation;
         float t = 0f;
         while (t < 1f)
         {
-            t = Mathf.Min(1f, t + Time.deltaTime * openSpeed);
+            if (closingNearPlayer != null && !PlayerPastGateSweep(closingNearPlayer)) yield break;
+            t = Mathf.Min(1f, t + Time.deltaTime * Mathf.Max(0.01f, openSpeed));
             float e = 1f - (1f - t) * (1f - t); // 처음엔 빠르게, 끝에서 천천히 (무거운 철문 느낌)
-            leftHinge.localRotation = Quaternion.Slerp(leftClosed, leftOpen, e);
-            rightHinge.localRotation = Quaternion.Slerp(rightClosed, rightOpen, e);
-            yield return null;
+            leftHinge.localRotation = Quaternion.Slerp(leftStart, leftTarget, e);
+            rightHinge.localRotation = Quaternion.Slerp(rightStart, rightTarget, e);
+            Physics.SyncTransforms();
+            if (t < 1f) yield return null;
         }
     }
 
