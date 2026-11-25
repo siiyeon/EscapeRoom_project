@@ -16,17 +16,31 @@ public class GhostPatrol : MonoBehaviour
     public string allowedStairName = "Stair_2F_3F";     // 귀신이 오르내릴 수 있는 계단
     public int PatrolPointCount => patrolPoints.Count;
 
+    [Header("추격")]
+    [Min(0.1f)] public float chaseStartDistance = 12f;
+    [Min(0.1f)] public float chaseStopDistance = 18f;
+    [Min(0.1f)] public float chaseSpeedMultiplier = 1.5f;
+
     const float FloorTolerance = 0.15f;
+    const float ChasePathInterval = 0.25f;
+    const float BodyClearance = 0.01f;
     readonly List<Vector3> patrolPoints = new List<Vector3>();
     NavMeshPath path;
     NavMeshData navigation;
     NavMeshDataInstance navigationInstance;
     NavMeshAgent agent;
+    CapsuleCollider body;
     float nextMoveTime;
     float stuckTime;
     Vector3 lastPosition;
     Vector3 safePosition;
     PlayerController player;
+    CharacterController playerBody;
+    bool chasing;
+    float nextChasePathTime;
+    Texture2D heartbeatVignette;
+    float heartbeatPhase;
+    float heartbeatOpacity;
 
     // 여자 귀신 애니메이션: 멈춰 있으면 Idle, 움직이면 Walk (HorrorGirlImporter가 만든 애니메이터 사용)
     [Header("애니메이션")]
@@ -123,13 +137,29 @@ public class GhostPatrol : MonoBehaviour
             if (animator.runtimeAnimatorController == null)
                 Debug.LogWarning("[GhostPatrol] 애니메이터 '" + animatorResource + "'를 찾지 못했습니다. 귀신이 애니메이션 없이 움직입니다.", this);
         }
+        float scale = Mathf.Max(transform.lossyScale.y, 0.01f);
+        float horizontalScale = Mathf.Max(Mathf.Max(Mathf.Abs(transform.lossyScale.x), Mathf.Abs(transform.lossyScale.z)), 0.01f);
+        body = GetComponent<CapsuleCollider>();
+        if (body == null) body = gameObject.AddComponent<CapsuleCollider>();
+        body.direction = 1;
+        body.height = settings.agentHeight / scale;
+        body.radius = settings.agentRadius / horizontalScale;
+        body.center = Vector3.up * (body.height * 0.5f);
+        body.isTrigger = false;
+        FindPlayer();
+        if (OverlapsPlayer(spawn))
+        {
+            int freePoint = patrolPoints.FindIndex(point => !OverlapsPlayer(point));
+            if (freePoint < 0) { body.enabled = false; Fail("Could not find a spawn clear of the player."); return; }
+            spawn = patrolPoints[freePoint];
+        }
+
         transform.position = spawn;
         agent = GetComponent<NavMeshAgent>();
         if (agent == null) agent = gameObject.AddComponent<NavMeshAgent>();
         agent.agentTypeID = settings.agentTypeID;
         // NavMeshAgent 크기는 오브젝트 Scale이 곱해지므로 나눠서 길 설정과 실제 크기를 맞춘다
-        float scale = Mathf.Max(transform.lossyScale.y, 0.01f);
-        agent.radius = settings.agentRadius / scale;
+        agent.radius = body.radius;
         agent.height = settings.agentHeight / scale;
         agent.baseOffset = 0f;
         agent.angularSpeed = 180f;
@@ -138,8 +168,9 @@ public class GhostPatrol : MonoBehaviour
         agent.autoTraverseOffMeshLink = false;
         agent.autoRepath = false;
         agent.Warp(spawn);
+        agent.updatePosition = false;
+        Physics.SyncTransforms();
         safePosition = lastPosition = spawn;
-        player = FindFirstObjectByType<PlayerController>();
         UpdateSpeed();
         IsReady = true;
         ChooseDestination();
@@ -148,10 +179,16 @@ public class GhostPatrol : MonoBehaviour
     void Update()
     {
         if (!IsReady || agent == null || !agent.isOnNavMesh) return;
-        UpdateSpeed();
         agent.isStopped = SceneTravel.IsTraveling;
-        UpdateAnimation();
-        if (agent.isStopped) return;
+        if (agent.isStopped)
+        {
+            if (chasing) StopChase();
+            heartbeatOpacity = 0f;
+            heartbeatPhase = 0f;
+            return;
+        }
+
+        FindPlayer();
 
         // 2층~3층 범위(계단 포함)를 벗어나면 마지막 안전한 위치로 되돌린다
         if (!InBand(transform.position.y))
@@ -160,30 +197,198 @@ public class GhostPatrol : MonoBehaviour
             agent.Warp(safePosition);
         }
         safePosition = transform.position;
-        if (!agent.pathPending && (!agent.hasPath || agent.remainingDistance <= agent.stoppingDistance + 0.1f))
+
+        UpdateChase();
+        UpdateSpeed();
+        UpdateHeartbeat();
+
+        if (!chasing && !agent.pathPending && (!agent.hasPath || agent.remainingDistance <= agent.stoppingDistance + 0.1f))
         {
             if (nextMoveTime <= 0f) nextMoveTime = Time.time + pauseAtDestination;
             if (Time.time >= nextMoveTime) ChooseDestination();
         }
         else nextMoveTime = 0f;
 
-        stuckTime = agent.hasPath && Vector3.Distance(lastPosition, transform.position) < 0.05f * Time.deltaTime
+        stuckTime = agent.hasPath && agent.remainingDistance > agent.stoppingDistance + 0.1f
+            && Vector3.Distance(lastPosition, transform.position) < 0.05f * Time.deltaTime
             ? stuckTime + Time.deltaTime : 0f;
         lastPosition = transform.position;
         if (stuckTime > 3f) { agent.ResetPath(); stuckTime = 0f; nextMoveTime = 0f; }
     }
 
-    void UpdateAnimation()
+    void FindPlayer()
+    {
+        if (player != null) return;
+        player = FindFirstObjectByType<PlayerController>();
+        playerBody = player != null ? player.GetComponent<CharacterController>() : null;
+    }
+
+    bool HasPlayerBody => playerBody != null && playerBody.enabled && playerBody.gameObject.activeInHierarchy;
+
+    bool OverlapsPlayer(Vector3 position)
+    {
+        return HasPlayerBody && Physics.ComputePenetration(body, position, transform.rotation,
+            playerBody, playerBody.transform.position, playerBody.transform.rotation, out _, out _);
+    }
+
+    void LateUpdate()
+    {
+        if (!IsReady || agent == null || !agent.isOnNavMesh) return;
+
+        Vector3 start = transform.position;
+        Vector3 destination = agent.nextPosition;
+        if (!InBand(destination.y))
+        {
+            agent.ResetPath();
+            destination = start;
+        }
+        if (agent.isStopped) destination = start;
+        Vector3 movement = destination - start;
+        float distance = movement.magnitude;
+        if (distance > 0f && HasPlayerBody)
+        {
+            Bounds bodyBounds = body.bounds;
+            Bounds playerBounds = playerBody.bounds;
+            Bounds sweptBounds = bodyBounds;
+            sweptBounds.Encapsulate(bodyBounds.min + movement);
+            sweptBounds.Encapsulate(bodyBounds.max + movement);
+            if (sweptBounds.Intersects(playerBounds))
+            {
+                Vector3 direction = movement / distance;
+                float radius = Mathf.Max(bodyBounds.extents.x, bodyBounds.extents.z);
+                float halfSegment = Mathf.Max(0f, bodyBounds.extents.y - radius);
+                Vector3 axis = Vector3.up * halfSegment;
+                Vector3 center = bodyBounds.center;
+                int playerLayer = 1 << playerBody.gameObject.layer;
+                foreach (RaycastHit hit in Physics.CapsuleCastAll(center - axis, center + axis, radius,
+                    direction, distance, playerLayer, QueryTriggerInteraction.Ignore))
+                {
+                    if (hit.collider != playerBody) continue;
+                    if (hit.distance == 0f && Vector3.Dot(direction, center - playerBounds.center) >= 0f) continue;
+                    destination = start + direction * Mathf.Max(0f, hit.distance - BodyClearance);
+                    break;
+                }
+                if (OverlapsPlayer(destination)) destination = start;
+            }
+        }
+
+        if (destination != agent.nextPosition) agent.nextPosition = destination;
+        if (destination != start)
+        {
+            transform.position = destination;
+            Physics.SyncTransforms();
+        }
+        UpdateAnimation(Time.deltaTime > 0f ? Vector3.Distance(start, destination) / Time.deltaTime : 0f);
+    }
+
+    void UpdateAnimation(float moving)
     {
         if (animator == null || animator.runtimeAnimatorController == null) return;
-        float moving = agent.isStopped ? 0f : agent.velocity.magnitude;
         animator.SetFloat(SpeedParam, moving);
         animator.speed = moving > 0.1f ? Mathf.Clamp(moving / (walkClipSpeed * transform.lossyScale.y), 1f, maxWalkPlaybackSpeed) : 1f; // 키가 크면 보폭도 커짐
     }
 
     void UpdateSpeed()
     {
-        agent.speed = player != null ? Mathf.Max(0.1f, player.walkSpeed * walkingSpeedRatio) : fallbackSpeed;
+        float patrolSpeed = player != null ? player.walkSpeed * walkingSpeedRatio : fallbackSpeed;
+        agent.speed = Mathf.Max(0.1f, patrolSpeed * (chasing ? chaseSpeedMultiplier : 1f));
+    }
+
+    void UpdateChase()
+    {
+        if (playerBody == null || !playerBody.gameObject.activeInHierarchy || gameObject.scene != SceneManager.GetActiveScene())
+        {
+            if (chasing) StopChase();
+            return;
+        }
+
+        Vector3 feet = playerBody.bounds.center;
+        feet.y = playerBody.bounds.min.y;
+        float distance = Vector3.Distance(transform.position, feet);
+        float limit = chasing ? Mathf.Max(chaseStartDistance, chaseStopDistance) : chaseStartDistance;
+        if (distance > limit)
+        {
+            if (chasing) StopChase();
+            return;
+        }
+
+        // Keep the last grounded destination while the player jumps.
+        if (!playerBody.isGrounded) return;
+        if (!InBand(feet.y))
+        {
+            if (chasing) StopChase();
+            return;
+        }
+
+        if (Time.time < nextChasePathTime) return;
+        nextChasePathTime = Time.time + ChasePathInterval;
+        bool reachable = NavMesh.SamplePosition(feet, out NavMeshHit target, 0.8f, NavMesh.AllAreas)
+            && Mathf.Abs(target.position.y - feet.y) < 0.45f
+            && SafePath(transform.position, target.position);
+        if (!reachable || !agent.SetPath(path))
+        {
+            if (chasing) StopChase();
+            return;
+        }
+
+        chasing = true;
+        agent.stoppingDistance = 0.85f;
+    }
+
+    void StopChase()
+    {
+        chasing = false;
+        agent.stoppingDistance = 0.25f;
+        agent.ResetPath();
+        nextMoveTime = 0f;
+        stuckTime = 0f;
+    }
+
+    void UpdateHeartbeat()
+    {
+        float proximity = 0f;
+        if (playerBody != null && playerBody.gameObject.activeInHierarchy && gameObject.scene == SceneManager.GetActiveScene()
+            && Mathf.Abs(playerBody.bounds.min.y - transform.position.y) < 2.2f)
+        {
+            proximity = Mathf.InverseLerp(10f, 1.5f, Vector3.Distance(transform.position, playerBody.bounds.center));
+        }
+
+        heartbeatPhase = Mathf.Repeat(heartbeatPhase + Time.deltaTime * Mathf.Lerp(65f, 150f, proximity) / 60f, 1f);
+        float firstBeat = Mathf.Clamp01(1f - Mathf.Abs(heartbeatPhase - 0.09f) / 0.09f);
+        float secondBeat = Mathf.Clamp01(1f - Mathf.Abs(heartbeatPhase - 0.30f) / 0.12f);
+        float targetOpacity = proximity * (0.23f + firstBeat * 0.42f + secondBeat * 0.23f);
+        heartbeatOpacity = Mathf.Lerp(heartbeatOpacity, targetOpacity, 1f - Mathf.Exp(-24f * Time.deltaTime));
+    }
+
+    void OnGUI()
+    {
+        if (Event.current.type != EventType.Repaint || heartbeatOpacity < 0.005f
+            || SceneTravel.IsTraveling || InventoryUI.IsOpen)
+            return;
+
+        if (heartbeatVignette == null)
+        {
+            const int size = 128;
+            heartbeatVignette = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            heartbeatVignette.wrapMode = TextureWrapMode.Clamp;
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float horizontal = 2f * x / (size - 1) - 1f;
+                float vertical = 2f * y / (size - 1) - 1f;
+                float radius = Mathf.Sqrt(horizontal * horizontal + vertical * vertical);
+                float edge = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.49f, 1.13f, radius));
+                pixels[y * size + x] = new Color32(164, 8, 20, (byte)Mathf.RoundToInt(edge * 255f));
+            }
+            heartbeatVignette.SetPixels32(pixels);
+            heartbeatVignette.Apply(false, true);
+        }
+
+        Color previousColor = GUI.color;
+        GUI.color = new Color(1f, 1f, 1f, heartbeatOpacity);
+        GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), heartbeatVignette);
+        GUI.color = previousColor;
     }
 
     void ChooseDestination()
@@ -246,6 +451,7 @@ public class GhostPatrol : MonoBehaviour
 
     void OnDestroy()
     {
+        if (heartbeatVignette != null) Destroy(heartbeatVignette);
         if (navigationInstance.valid) navigationInstance.Remove();
         if (navigation != null) Destroy(navigation);
     }
