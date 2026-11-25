@@ -93,6 +93,7 @@ public class KeyPickup : MonoBehaviour
             Title = "정문 열쇠 (Key)",
             Description = "철문의 자물쇠를 열 수 있을 것 같다.",
             Icon = ItemIconRenderer.Render(gameObject),
+            OnUse = IronGateController.TryUseKey, // 철문 앞에서 [마우스 좌클릭]으로 사용
         });
         HideKey();
     }

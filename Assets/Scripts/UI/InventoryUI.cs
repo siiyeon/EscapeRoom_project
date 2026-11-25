@@ -1,12 +1,13 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
 /// <summary>
-/// TAB키로 여는 출석부 느낌의 인벤토리 화면.
-/// - 열려 있는 동안 게임이 멈춘다 (Time.timeScale = 0 → 귀신도 멈춤, 플레이어 조작 정지, 소리 일시정지).
-/// - 왼쪽 페이지: 아이템 칸 12개 (4 x 3). WASD로 칸 선택 (마우스 커서는 나타나지 않음).
-/// - 오른쪽 페이지: 선택한 아이템의 큰 아이콘, 이름, 설명.
-/// - TAB 또는 ESC로 닫는다.
+/// TAB키로 여는 인벤토리 화면.
+/// - 배경: 멈춘 게임 화면 위에 어두운 막을 씌운다 (Time.timeScale = 0 → 귀신도 멈춤, 플레이어 조작 정지, 소리 일시정지).
+/// - 왼쪽: 장비 (GEAR) / 가운데: 획득한 아이템 & 단서 (4 x 4) / 오른쪽: 선택한 아이템 설명
+/// - 오른쪽 위: 현재 임무 (Mission.Current)
+/// - 조작: [WASD] 이동, [TAB] 닫기, [마우스 좌클릭] 사용 (마우스 커서는 나타나지 않음)
 /// 게임이 시작되면 자동으로 만들어진다 (씬에 넣을 필요 없음).
 /// </summary>
 public class InventoryUI : MonoBehaviour
@@ -15,24 +16,41 @@ public class InventoryUI : MonoBehaviour
 
     // 화면 비율이 달라도 같은 모양이 되도록 1600 x 900 기준으로 그린 뒤 크기를 맞춘다
     const float RefW = 1600f, RefH = 900f;
-    const int Columns = 4, Rows = 3;
+    const int Columns = 4;
+    const float Slot = 112f, Gap = 10f;
+
+    enum Section { Gear, Items }
 
     static InventoryUI instance;
+    Section section = Section.Items;
     int selected;
     float previousTimeScale = 1f;
     PlayerController pausedPlayer;
+    string feedback;
+    float feedbackUntil;
 
-    Texture2D white, leftPage, rightPage, leather, spine;
-    Font koreanFont, titleFont;
-    GUIStyle titleStyle, closeStyle, slotNameStyle, slotSubStyle, itemTitleStyle, descStyle, emptyStyle;
+    Texture2D white, vignette;
+    Font font, boldFont;
+    GUIStyle badgeStyle, titleStyle, missionStyle, headerStyle, itemTitleStyle, descStyle, hintStyle, slotTextStyle, feedbackStyle, emptyStyle;
 
     // 색
-    static readonly Color Ink = new Color(0.13f, 0.09f, 0.06f);
-    static readonly Color InkFaded = new Color(0.13f, 0.09f, 0.06f, 0.6f);
-    static readonly Color Rule = new Color(0.30f, 0.23f, 0.16f, 0.30f);
-    static readonly Color SlotBorder = new Color(0.17f, 0.12f, 0.08f, 0.9f);
-    static readonly Color SlotFill = new Color(0.20f, 0.15f, 0.10f, 0.22f);
-    static readonly Color SelectedBorder = new Color(0.45f, 0.05f, 0.04f, 1f);
+    static readonly Color TextMain = new Color(0.86f, 0.86f, 0.84f);
+    static readonly Color TextDim = new Color(0.62f, 0.62f, 0.60f);
+    static readonly Color MissionRed = new Color(0.86f, 0.25f, 0.20f);
+    static readonly Color Line = new Color(1f, 1f, 1f, 0.22f);
+    static readonly Color SlotFill = new Color(0.55f, 0.58f, 0.62f, 0.12f);
+    static readonly Color SlotBorder = new Color(1f, 1f, 1f, 0.16f);
+    static readonly Color SelFill = new Color(0.75f, 0.78f, 0.82f, 0.22f);
+    static readonly Color SelBorder = new Color(1f, 1f, 1f, 0.75f);
+
+    // 장비 칸 배치: 첫 줄 정사각형 3칸, 아래로 넓은 칸 3줄 (참고 이미지와 같은 모양)
+    static readonly Rect[] GearSlots =
+    {
+        new Rect(0f, 0f, Slot, Slot), new Rect(Slot + Gap, 0f, Slot, Slot), new Rect((Slot + Gap) * 2f, 0f, Slot, Slot),
+        new Rect(0f, (Slot + Gap) * 1f, Slot * 2f + Gap, Slot),
+        new Rect(0f, (Slot + Gap) * 2f, Slot * 2f + Gap, Slot),
+        new Rect(0f, (Slot + Gap) * 3f, Slot * 2f + Gap, Slot),
+    };
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     static void ResetStatics() { IsOpen = false; instance = null; }
@@ -47,6 +65,8 @@ public class InventoryUI : MonoBehaviour
         instance = go.AddComponent<InventoryUI>();
     }
 
+    // ───────────────────────── 입력 ─────────────────────────
+
     void Update()
     {
         var kb = Keyboard.current;
@@ -56,22 +76,78 @@ public class InventoryUI : MonoBehaviour
         {
             if (IsOpen) Close();
             else Open();
+            return;
         }
-        else if (IsOpen && kb.escapeKey.wasPressedThisFrame) Close();
-
         if (!IsOpen) return;
-        // WASD로 칸 이동 (열려 있는 동안 플레이어 조작은 꺼져 있어서 캐릭터는 안 움직인다)
-        if (kb.dKey.wasPressedThisFrame) selected = Mathf.Min(selected + 1, Inventory.Capacity - 1);
-        if (kb.aKey.wasPressedThisFrame) selected = Mathf.Max(selected - 1, 0);
-        if (kb.sKey.wasPressedThisFrame) selected = Mathf.Min(selected + Columns, Inventory.Capacity - 1);
-        if (kb.wKey.wasPressedThisFrame) selected = Mathf.Max(selected - Columns, 0);
+        if (kb.escapeKey.wasPressedThisFrame) { Close(); return; }
+
+        if (kb.wKey.wasPressedThisFrame) Move(0, -1);
+        if (kb.sKey.wasPressedThisFrame) Move(0, 1);
+        if (kb.aKey.wasPressedThisFrame) Move(-1, 0);
+        if (kb.dKey.wasPressedThisFrame) Move(1, 0);
+
+        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame) UseSelected();
+    }
+
+    void Move(int dx, int dy)
+    {
+        if (section == Section.Items)
+        {
+            int col = selected % Columns, row = selected / Columns;
+            if (dx < 0 && col == 0)
+            {
+                // 아이템 칸 맨 왼쪽에서 A → 장비 칸으로
+                section = Section.Gear;
+                selected = row == 0 ? 2 : Mathf.Min(2 + row, GearSlots.Length - 1);
+                return;
+            }
+            col = Mathf.Clamp(col + dx, 0, Columns - 1);
+            row = Mathf.Clamp(row + dy, 0, Inventory.Capacity / Columns - 1);
+            selected = row * Columns + col;
+            return;
+        }
+
+        // 장비 칸 (0,1,2 = 첫 줄, 3,4,5 = 넓은 칸)
+        if (dx > 0)
+        {
+            if (selected < 2) selected++;
+            else { section = Section.Items; selected = (selected <= 2 ? 0 : selected - 2) * Columns; }
+        }
+        else if (dx < 0) { if (selected > 0 && selected <= 2) selected--; }
+        else if (dy > 0) selected = selected <= 2 ? 3 : Mathf.Min(selected + 1, GearSlots.Length - 1);
+        else if (dy < 0)
+        {
+            if (selected == 3) selected = 0;        // 첫 넓은 칸 → 첫 줄
+            else if (selected > 3) selected--;      // 넓은 칸끼리 위로
+        }
+    }
+
+    InventoryItem SelectedItem()
+    {
+        IReadOnlyList<InventoryItem> list = section == Section.Gear ? Inventory.Gear : Inventory.Items;
+        return selected < list.Count ? list[selected] : null;
+    }
+
+    void UseSelected()
+    {
+        InventoryItem item = SelectedItem();
+        if (item == null) return;
+        if (item.OnUse != null)
+        {
+            Close(); // 사용 효과가 게임 안에서 바로 보이도록 먼저 닫는다
+            if (item.OnUse()) return;
+            Open();  // 사용할 수 없으면 다시 연다
+        }
+        feedback = "지금은 사용할 수 없다.";
+        feedbackUntil = Time.unscaledTime + 2f;
     }
 
     void Open()
     {
-        if (SceneTravel.IsTraveling) return;
+        if (SceneTravel.IsTraveling || IsOpen) return;
         IsOpen = true;
-        if (selected >= Inventory.Items.Count) selected = 0;
+        IReadOnlyList<InventoryItem> list = section == Section.Gear ? Inventory.Gear : Inventory.Items;
+        if (selected >= list.Count) { section = Section.Items; selected = 0; }
 
         previousTimeScale = Time.timeScale > 0f ? Time.timeScale : 1f;
         Time.timeScale = 0f;
@@ -81,11 +157,12 @@ public class InventoryUI : MonoBehaviour
         pausedPlayer = player != null ? player.GetComponent<PlayerController>() : null;
         if (pausedPlayer != null && pausedPlayer.enabled) pausedPlayer.enabled = false;
         else pausedPlayer = null;
-        // 마우스 커서는 숨긴 채로 둔다 (조작은 WASD만)
+        // 마우스 커서는 숨긴 채로 둔다 (클릭은 '사용'으로만 쓰임)
     }
 
     void Close()
     {
+        if (!IsOpen) return;
         IsOpen = false;
         Time.timeScale = previousTimeScale;
         AudioListener.pause = false;
@@ -96,8 +173,10 @@ public class InventoryUI : MonoBehaviour
     void OnDestroy()
     {
         if (IsOpen) { Time.timeScale = previousTimeScale; AudioListener.pause = false; IsOpen = false; }
-        foreach (Object o in new Object[] { white, leftPage, rightPage, leather, spine, koreanFont, titleFont })
-            if (o != null) Destroy(o);
+        if (white != null) Destroy(white);
+        if (vignette != null) Destroy(vignette);
+        if (font != null) Destroy(font);
+        if (boldFont != null) Destroy(boldFont);
     }
 
     // ───────────────────────── 그리기 ─────────────────────────
@@ -108,113 +187,146 @@ public class InventoryUI : MonoBehaviour
         EnsureResources();
         GUI.depth = -500;
 
-        // 뒤 배경 어둡게
-        GUI.color = new Color(0f, 0f, 0f, 0.72f);
+        // 멈춘 게임 화면 위에 어두운 막 + 가장자리 더 어둡게
+        Color prev = GUI.color;
+        GUI.color = new Color(0.02f, 0.03f, 0.04f, 0.62f);
         GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), white);
-        GUI.color = Color.white;
+        GUI.color = prev;
+        GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), vignette);
 
-        float scale = Mathf.Min(Screen.width / RefW, Screen.height / RefH);
-        Matrix4x4 old = GUI.matrix;
-        GUI.matrix = Matrix4x4.TRS(new Vector3((Screen.width - RefW * scale) / 2f, (Screen.height - RefH * scale) / 2f, 0f),
-                                   Quaternion.identity, new Vector3(scale, scale, 1f));
+        // 글씨가 깨지지 않도록 화면 전체를 늘리지(GUI.matrix) 않고,
+        // 위치/크기와 글자 크기를 화면 해상도에 맞춰 직접 계산해서 그린다.
+        UpdateScale();
 
-        Rect book = new Rect(200f, 85f, 1200f, 730f);
-        DrawBook(book, out Rect left, out Rect right);
-        DrawLeftPage(left);
-        DrawRightPage(right);
+        // 위쪽: 제목 / 임무
+        Label(new Rect(70f, 40f, 600f, 60f), "INVENTORY", titleStyle);
+        Label(new Rect(900f, 48f, 630f, 40f), "[임무: " + Mission.Current + "]", missionStyle);
 
-        GUI.matrix = old;
+        DrawGear(new Vector2(70f, 160f));
+        DrawItems(new Vector2(560f, 160f));
+        Fill(new Rect(1090f, 205f, 1f, 500f), Line); // 가운데와 오른쪽 사이 세로선
+        DrawDetail(new Rect(1120f, 205f, 410f, 560f));
+
+        // 아래쪽: 조작 안내 (화면 맨 아래 띠에만 그린다 → 설명 칸에는 절대 겹치지 않음)
+        Fill(new Rect(40f, 800f, 1520f, 1f), Line);
+        Label(new Rect(900f, 815f, 630f, 34f), "[WASD] 이동    [TAB] 닫기    [마우스 좌클릭] 사용", hintStyle);
     }
 
-    void DrawBook(Rect book, out Rect left, out Rect right)
+    void DrawGear(Vector2 origin)
     {
-        // 그림자 + 가죽 표지
-        Fill(new Rect(book.x + 10, book.y + 14, book.width, book.height), new Color(0, 0, 0, 0.45f));
-        Rect cover = new Rect(book.x - 16, book.y - 14, book.width + 32, book.height + 28);
-        GUI.DrawTexture(cover, leather);
-        Frame(cover, 2f, new Color(0.08f, 0.03f, 0.02f, 0.9f));
+        Label(new Rect(origin.x, origin.y, 400f, 34f), "장비 (GEAR)", headerStyle);
+        Fill(new Rect(origin.x, origin.y + 38f, Slot * 3f + Gap * 2f + 20f, 1f), Line);
 
-        float half = book.width / 2f;
-        left = new Rect(book.x, book.y, half, book.height);
-        right = new Rect(book.x + half, book.y, half, book.height);
-        GUI.DrawTexture(left, leftPage);
-        GUI.DrawTexture(right, rightPage);
-
-        // 가운데 접히는 부분
-        GUI.DrawTexture(new Rect(book.x + half - 28f, book.y, 56f, book.height), spine);
-        Fill(new Rect(book.x + half - 1f, book.y, 2f, book.height), new Color(0.15f, 0.1f, 0.07f, 0.5f));
+        for (int i = 0; i < GearSlots.Length; i++)
+        {
+            Rect r = GearSlots[i];
+            r.x += origin.x; r.y += origin.y + 45f;
+            InventoryItem item = i < Inventory.Gear.Count ? Inventory.Gear[i] : null;
+            DrawSlot(r, item, section == Section.Gear && selected == i, iconSquare: true);
+        }
     }
 
-    void DrawLeftPage(Rect page)
+    void DrawItems(Vector2 origin)
     {
-        GUI.Label(new Rect(page.x + 44f, page.y + 26f, 400f, 64f), "Inventory", titleStyle);
-        Fill(new Rect(page.x + 40f, page.y + 92f, page.width - 84f, 2f), new Color(Ink.r, Ink.g, Ink.b, 0.55f));
-
-        const float slotW = 118f, slotH = 132f, gapX = 16f, gapY = 22f;
-        float gridW = Columns * slotW + (Columns - 1) * gapX;
-        float startX = page.x + (page.width - gridW) / 2f - 6f;
-        float startY = page.y + 128f;
+        Label(new Rect(origin.x, origin.y, 500f, 34f), "획득한 아이템 & 단서", headerStyle);
+        Fill(new Rect(origin.x, origin.y + 38f, Columns * Slot + (Columns - 1) * Gap + 20f, 1f), Line);
 
         for (int i = 0; i < Inventory.Capacity; i++)
         {
             int col = i % Columns, row = i / Columns;
-            Rect slot = new Rect(startX + col * (slotW + gapX), startY + row * (slotH + gapY), slotW, slotH);
+            Rect r = new Rect(origin.x + col * (Slot + Gap), origin.y + 45f + row * (Slot + Gap), Slot, Slot);
             InventoryItem item = i < Inventory.Items.Count ? Inventory.Items[i] : null;
-
-            Fill(slot, SlotFill);
-            Frame(slot, 2f, SlotBorder);
-            Frame(new Rect(slot.x + 4f, slot.y + 4f, slot.width - 8f, slot.height - 8f), 1f, new Color(SlotBorder.r, SlotBorder.g, SlotBorder.b, 0.35f));
-            if (i == selected) Frame(new Rect(slot.x - 3f, slot.y - 3f, slot.width + 6f, slot.height + 6f), 3f, SelectedBorder);
-
-            if (item != null)
-            {
-                if (item.Icon != null)
-                    GUI.DrawTexture(new Rect(slot.x + 16f, slot.y + 8f, slot.width - 32f, slot.width - 32f), item.Icon, ScaleMode.ScaleToFit, true);
-                GUI.Label(new Rect(slot.x, slot.y + slotH - 44f, slotW, 24f), item.SlotName, slotNameStyle);
-                if (!string.IsNullOrEmpty(item.SlotSubName))
-                    GUI.Label(new Rect(slot.x, slot.y + slotH - 24f, slotW, 18f), "(" + item.SlotSubName + ")", slotSubStyle);
-            }
+            DrawSlot(r, item, section == Section.Items && selected == i, iconSquare: true);
         }
     }
 
-    void DrawRightPage(Rect page)
+    void DrawSlot(Rect r, InventoryItem item, bool isSelected, bool iconSquare)
     {
-        // 공책 줄
-        for (float y = page.y + 96f; y < page.yMax - 28f; y += 38f)
-            Fill(new Rect(page.x + 34f, y, page.width - 64f, 1f), Rule);
-        foreach (float x in new[] { 52f, 60f, 92f })
-            Fill(new Rect(page.x + x, page.y + 60f, 1f, page.height - 90f), Rule);
+        Fill(r, isSelected ? SelFill : SlotFill);
+        Frame(r, isSelected ? 2f : 1f, isSelected ? SelBorder : SlotBorder);
+        if (item == null) return;
 
-        GUI.Label(new Rect(page.xMax - 200f, page.y + 30f, 160f, 34f), "[TAB] 닫기", closeStyle);
+        // 넓은 칸은 왼쪽 정사각형 부분에 아이콘
+        Rect iconArea = iconSquare ? new Rect(r.x, r.y, Mathf.Min(r.width, r.height), r.height) : r;
+        if (item.Icon != null)
+            Tex(new Rect(iconArea.x + 4f, iconArea.y + 4f, iconArea.width - 8f, iconArea.height - 8f), item.Icon);
+        else
+            Label(iconArea, item.SlotName, slotTextStyle);
 
-        InventoryItem item = selected < Inventory.Items.Count ? Inventory.Items[selected] : null;
+        // 칸 오른쪽 아래 작은 글자 (예: 손전등 배터리 100%)
+        string badge = item.Badge?.Invoke();
+        if (!string.IsNullOrEmpty(badge))
+            Label(new Rect(iconArea.x, iconArea.yMax - 26f, iconArea.width - 8f, 22f), badge, badgeStyle);
+    }
+
+    void DrawDetail(Rect area)
+    {
+        Rect preview = new Rect(area.x, area.y, area.width, 170f);
+        Fill(preview, SlotFill);
+        Frame(preview, 1f, SlotBorder);
+
+        InventoryItem item = SelectedItem();
         if (item == null)
         {
-            GUI.Label(new Rect(page.x + 60f, page.y + 300f, page.width - 120f, 60f),
-                Inventory.Items.Count == 0 ? "아직 가진 물건이 없다." : "빈 칸", emptyStyle);
-            return;
+            Label(new Rect(area.x, area.y + 190f, area.width, 40f),
+                Inventory.Items.Count == 0 && Inventory.Gear.Count == 0 ? "아직 가진 물건이 없다." : "빈 칸", emptyStyle);
+        }
+        else
+        {
+            if (item.Icon != null)
+                Tex(new Rect(preview.center.x - 82f, preview.y + 4f, 164f, 162f), item.Icon);
+            Label(new Rect(area.x, area.y + 190f, area.width, 40f), item.Title + "  —", itemTitleStyle);
+            Label(new Rect(area.x, area.y + 240f, area.width, 260f), item.Description, descStyle);
         }
 
-        if (item.Icon != null)
-            GUI.DrawTexture(new Rect(page.center.x - 140f, page.y + 92f, 280f, 280f), item.Icon, ScaleMode.ScaleToFit, true);
-        GUI.Label(new Rect(page.x + 120f, page.y + 410f, page.width - 170f, 48f), item.Title, itemTitleStyle);
-        GUI.Label(new Rect(page.x + 120f, page.y + 470f, page.width - 170f, 200f), item.Description, descStyle);
+        if (Time.unscaledTime < feedbackUntil)
+            Label(new Rect(area.x, area.yMax - 40f, area.width, 34f), feedback, feedbackStyle);
     }
+
+    // ── 1600x900 기준 좌표 → 실제 화면 픽셀 (정수로 맞춰서 선과 글씨가 또렷하게) ──
+    float k = 1f, ox, oy;
+    int scaledFor = -1;
+
+    void UpdateScale()
+    {
+        k = Mathf.Min(Screen.width / RefW, Screen.height / RefH);
+        ox = Mathf.Round((Screen.width - RefW * k) / 2f);
+        oy = Mathf.Round((Screen.height - RefH * k) / 2f);
+        int key = Screen.width * 10000 + Screen.height;
+        if (key == scaledFor) return;
+        scaledFor = key;
+        foreach (var pair in baseSizes) pair.Key.fontSize = Mathf.Max(8, Mathf.RoundToInt(pair.Value * k));
+    }
+
+    Rect T(Rect r)
+    {
+        float x = Mathf.Round(ox + r.x * k), y = Mathf.Round(oy + r.y * k);
+        return new Rect(x, y, Mathf.Max(1f, Mathf.Round(ox + r.xMax * k) - x), Mathf.Max(1f, Mathf.Round(oy + r.yMax * k) - y));
+    }
+
+    void Label(Rect r, string text, GUIStyle style) => GUI.Label(T(r), text, style);
+    void Tex(Rect r, Texture tex) => GUI.DrawTexture(T(r), tex, ScaleMode.ScaleToFit, true);
 
     void Fill(Rect r, Color c)
     {
         Color prev = GUI.color;
         GUI.color = c;
-        GUI.DrawTexture(r, white);
+        GUI.DrawTexture(T(r), white);
         GUI.color = prev;
     }
 
+    // 테두리 두께는 화면 크기와 상관없이 1~2픽셀로 또렷하게
     void Frame(Rect r, float t, Color c)
     {
-        Fill(new Rect(r.x, r.y, r.width, t), c);
-        Fill(new Rect(r.x, r.yMax - t, r.width, t), c);
-        Fill(new Rect(r.x, r.y, t, r.height), c);
-        Fill(new Rect(r.xMax - t, r.y, t, r.height), c);
+        Rect s = T(r);
+        float px = Mathf.Max(1f, Mathf.Round(t * Mathf.Min(k, 1.5f)));
+        Color prev = GUI.color;
+        GUI.color = c;
+        GUI.DrawTexture(new Rect(s.x, s.y, s.width, px), white);
+        GUI.DrawTexture(new Rect(s.x, s.yMax - px, s.width, px), white);
+        GUI.DrawTexture(new Rect(s.x, s.y + px, px, s.height - px * 2f), white);
+        GUI.DrawTexture(new Rect(s.xMax - px, s.y + px, px, s.height - px * 2f), white);
+        GUI.color = prev;
     }
 
     // ───────────────────────── 리소스 (코드로 생성) ─────────────────────────
@@ -226,119 +338,51 @@ public class InventoryUI : MonoBehaviour
         white = new Texture2D(1, 1) { hideFlags = HideFlags.DontSave };
         white.SetPixel(0, 0, Color.white);
         white.Apply();
+        vignette = MakeVignette();
 
-        leftPage = MakePaper(spineOnRight: true, seed: 3.1f);
-        rightPage = MakePaper(spineOnRight: false, seed: 7.7f);
-        leather = MakeLeather();
-        spine = MakeSpine();
-
-        koreanFont = Font.CreateDynamicFontFromOSFont(new[] { "Malgun Gothic", "맑은 고딕", "Arial" }, 24);
-        titleFont = Font.CreateDynamicFontFromOSFont(new[] { "Georgia", "Times New Roman", "Malgun Gothic" }, 48);
-
-        titleStyle = Style(titleFont, 50, FontStyle.BoldAndItalic, TextAnchor.MiddleLeft, Ink);
-        closeStyle = Style(koreanFont, 20, FontStyle.Normal, TextAnchor.MiddleRight, Ink);
-        slotNameStyle = Style(koreanFont, 16, FontStyle.Bold, TextAnchor.MiddleCenter, Ink);
-        slotSubStyle = Style(koreanFont, 12, FontStyle.Normal, TextAnchor.MiddleCenter, InkFaded);
-        itemTitleStyle = Style(koreanFont, 30, FontStyle.Bold, TextAnchor.MiddleLeft, Ink);
-        descStyle = Style(koreanFont, 22, FontStyle.Normal, TextAnchor.UpperLeft, Ink);
+        // 맑은 고딕에는 기울임꼴이 없고 굵은 글씨는 별도 글꼴이라, 가짜로 기울이거나 굵게 만들면 글씨가 깨진다
+        font = Font.CreateDynamicFontFromOSFont(new[] { "Malgun Gothic", "맑은 고딕", "Arial" }, 24);
+        boldFont = Font.CreateDynamicFontFromOSFont(new[] { "Malgun Gothic Bold", "맑은 고딕 Bold", "Malgun Gothic", "Arial" }, 24);
+        titleStyle = Style(40, FontStyle.Normal, TextAnchor.MiddleLeft, TextMain);
+        missionStyle = Style(22, FontStyle.Normal, TextAnchor.MiddleRight, MissionRed);
+        headerStyle = Style(21, FontStyle.Normal, TextAnchor.MiddleLeft, TextDim);
+        itemTitleStyle = Style(24, FontStyle.Bold, TextAnchor.MiddleLeft, TextMain);
+        descStyle = Style(18, FontStyle.Normal, TextAnchor.UpperLeft, TextDim);
         descStyle.wordWrap = true;
-        emptyStyle = Style(koreanFont, 22, FontStyle.Italic, TextAnchor.MiddleCenter, InkFaded);
+        hintStyle = Style(18, FontStyle.Normal, TextAnchor.MiddleRight, TextDim);
+        slotTextStyle = Style(16, FontStyle.Bold, TextAnchor.MiddleCenter, TextMain);
+        feedbackStyle = Style(18, FontStyle.Normal, TextAnchor.MiddleLeft, MissionRed);
+        emptyStyle = Style(20, FontStyle.Normal, TextAnchor.MiddleLeft, TextDim);
+        badgeStyle = Style(15, FontStyle.Normal, TextAnchor.LowerRight, TextMain);
     }
 
-    static GUIStyle Style(Font font, int size, FontStyle fs, TextAnchor anchor, Color color)
+    readonly Dictionary<GUIStyle, int> baseSizes = new Dictionary<GUIStyle, int>();
+
+    GUIStyle Style(int size, FontStyle fs, TextAnchor anchor, Color color)
     {
-        var s = new GUIStyle { font = font, fontSize = size, fontStyle = fs, alignment = anchor, richText = false };
+        bool bold = fs == FontStyle.Bold;
+        var s = new GUIStyle { font = bold ? boldFont : font, fontSize = size, fontStyle = FontStyle.Normal, alignment = anchor, richText = false };
         s.normal.textColor = color;
+        s.clipping = TextClipping.Clip;
+        s.name = "InventoryUI_" + baseSizes.Count;
+        baseSizes[s] = size;
         return s;
     }
 
-    static float Fbm(float x, float y)
+    // 화면 가장자리를 어둡게 하는 비네팅
+    static Texture2D MakeVignette()
     {
-        return Mathf.PerlinNoise(x, y) * 0.55f + Mathf.PerlinNoise(x * 2.3f, y * 2.3f) * 0.3f + Mathf.PerlinNoise(x * 6f, y * 6f) * 0.15f;
-    }
-
-    // 오래되어 바랜 종이:
-    // 누렇게 바랜 색 + 얼룩 + 검은 점 + 군데군데 그을린 테두리 + 찢어진 테두리와 뜯겨나간 모서리.
-    // 찢어진 부분은 투명해서 뒤의 어두운 표지가 보인다. 가운데(접히는 쪽)는 찢지 않는다.
-    static Texture2D MakePaper(bool spineOnRight, float seed)
-    {
-        const int w = 384, h = 468;
-        var tex = new Texture2D(w, h, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, hideFlags = HideFlags.DontSave };
-        var px = new Color[w * h];
-        Color baseCol = new Color(0.64f, 0.56f, 0.41f);
-        for (int y = 0; y < h; y++)
-        for (int x = 0; x < w; x++)
-        {
-            float u = x / (float)(w - 1), v = y / (float)(h - 1);
-            float n = Fbm(u * 5f + seed, v * 6f + seed);
-
-            // 얼룩: 넓게 번진 얼룩 + 검은 점
-            float blot = Mathf.PerlinNoise(u * 2.2f + seed * 3f, v * 2.2f + seed);
-            float stain = Mathf.Clamp01((blot - 0.58f) * 3f);
-            float speck = Mathf.PerlinNoise(u * 90f + seed, v * 90f) > 0.82f ? 0.18f : 0f;
-
-            // 가장자리까지 거리 (접히는 쪽은 찢지 않으므로 바깥 세 변만)
-            float spineDist = spineOnRight ? 1f - u : u;
-            float outerX = spineOnRight ? u : 1f - u;
-            float edge = Mathf.Min(outerX, Mathf.Min(v, 1f - v));
-
-            // 테두리를 따라가는 좌표 (변마다 따로)
-            float along = (outerX < Mathf.Min(v, 1f - v)) ? v * 40f : u * 32f + 100f;
-            // 군데군데만 그을린 구간 (0 = 멀쩡, 1 = 심하게 탐)
-            float scorch = Mathf.Clamp01((Mathf.PerlinNoise(along * 0.12f + seed * 7f, seed * 2f) - 0.5f) * 4f);
-            // 찢어진 테두리: 들쭉날쭉한 깊이 (탄 곳은 더 깊이 먹혀 들어감)
-            float tear = 0.010f + Fbm(along + seed * 5f, seed) * 0.03f + scorch * 0.025f;
-            // 뜯겨나간 모서리 (왼쪽 페이지는 왼쪽 위, 오른쪽 페이지는 오른쪽 아래)
-            float cornerDist = spineOnRight ? u + (1f - v) : (1f - u) + v;
-            float corner = (spineOnRight ? 0.09f : 0.13f) + Fbm(u * 25f + seed, v * 25f) * 0.05f;
-            bool missing = edge < tear || cornerDist < corner;
-
-            // 그을음: 탄 구간에서만, 찢어진 끝에서 안쪽으로 번지듯 (모서리 뜯긴 곳은 약하게)
-            float burnEdge = Mathf.Pow(Mathf.Clamp01(1f - (edge - tear) / 0.06f), 1.5f) * scorch * 0.75f;
-            float burnCorner = Mathf.Clamp01(1f - (cornerDist - corner) / 0.03f) * 0.3f;
-            float burn = Mathf.Max(burnEdge, burnCorner);
-            float spineShade = Mathf.Pow(Mathf.Clamp01(1f - spineDist / 0.13f), 2f) * 0.4f;
-            float edgeShade = Mathf.Pow(Mathf.Clamp01(1f - edge / 0.08f), 2f) * 0.12f;
-
-            float k = 0.80f + n * 0.22f - stain * 0.2f - speck - burn - spineShade - edgeShade;
-            k = Mathf.Max(k, 0.05f);
-            px[y * w + x] = new Color(baseCol.r * k, baseCol.g * k * (1f - stain * 0.05f), baseCol.b * k * (1f - stain * 0.15f),
-                                      missing ? 0f : 1f);
-        }
-        tex.SetPixels(px);
-        tex.Apply();
-        return tex;
-    }
-
-    // 어두운 출석부 표지 (거의 검은 고동색)
-    static Texture2D MakeLeather()
-    {
-        const int s = 192;
+        const int s = 128;
         var tex = new Texture2D(s, s, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, hideFlags = HideFlags.DontSave };
         var px = new Color[s * s];
         for (int y = 0; y < s; y++)
         for (int x = 0; x < s; x++)
         {
-            float u = x / (float)(s - 1), v = y / (float)(s - 1);
-            float n = Fbm(u * 9f + 11f, v * 9f + 5f);
-            float edge = Mathf.Min(Mathf.Min(u, 1f - u), Mathf.Min(v, 1f - v));
-            float k = 0.7f + n * 0.45f - Mathf.Clamp01(1f - edge / 0.05f) * 0.35f;
-            px[y * s + x] = new Color(0.11f * k, 0.065f * k, 0.05f * k, 1f);
+            float u = x / (float)(s - 1) * 2f - 1f, v = y / (float)(s - 1) * 2f - 1f;
+            float d = Mathf.Clamp01((Mathf.Sqrt(u * u + v * v) - 0.55f) / 0.9f);
+            px[y * s + x] = new Color(0f, 0f, 0f, d * d * 0.7f);
         }
         tex.SetPixels(px);
-        tex.Apply();
-        return tex;
-    }
-
-    static Texture2D MakeSpine()
-    {
-        const int w = 64;
-        var tex = new Texture2D(w, 1, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, hideFlags = HideFlags.DontSave };
-        for (int x = 0; x < w; x++)
-        {
-            float t = Mathf.Abs(x / (float)(w - 1) - 0.5f) * 2f; // 가운데 0 → 양 끝 1
-            tex.SetPixel(x, 0, new Color(0.12f, 0.07f, 0.04f, Mathf.Pow(1f - t, 1.6f) * 0.55f));
-        }
         tex.Apply();
         return tex;
     }

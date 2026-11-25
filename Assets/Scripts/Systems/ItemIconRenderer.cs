@@ -22,6 +22,7 @@ public static class ItemIconRenderer
         {
             var mr = mf.GetComponent<MeshRenderer>();
             if (mf.sharedMesh == null || mr == null) continue;
+            if (mf.name.Contains("Preview")) continue; // 모델링할 때 쓴 미리보기용 바닥판 등은 빼고 찍는다
             // 원본 루트 기준 상대 위치/회전/크기 그대로 복사 (루트의 크기·회전은 빼서 원래 모양으로)
             Matrix4x4 rel = source.transform.worldToLocalMatrix * mf.transform.localToWorldMatrix;
             var part = new GameObject(mf.name) { layer = IconLayer };
@@ -42,23 +43,40 @@ public static class ItemIconRenderer
         Bounds b = parts[0].bounds;
         for (int i = 1; i < parts.Length; i++) b.Encapsulate(parts[i].bounds);
 
-        // 가장 얇은 축 방향에서 내려다보고, 긴 축이 화면에서 대각선으로 놓이게 한다
-        Vector3 s = b.size;
-        int thin = s.x <= s.y && s.x <= s.z ? 0 : (s.y <= s.z ? 1 : 2);
-        int a1 = (thin + 1) % 3, a2 = (thin + 2) % 3;
-        int longAxis = s[a1] >= s[a2] ? a1 : a2;
-        int midAxis = longAxis == a1 ? a2 : a1;
-        Vector3 viewDir = Axis(thin);
-        Vector3 up = (Axis(longAxis) + Axis(midAxis)).normalized;
-        float half = (s[longAxis] + s[midAxis]) * 0.5f / Mathf.Sqrt(2f);
-        float dist = Mathf.Max(s.magnitude, 0.05f) * 2f;
+        // 모델이 비스듬히 놓여 있어도 되도록, 부품 위치들로 "긴 축 / 중간 축 / 얇은 축"을 구한다
+        var pts = new System.Collections.Generic.List<Vector3>();
+        foreach (Renderer r in parts) AddCorners(pts, r.bounds);
+        Vector3 longAxis = PrincipalAxis(pts, b.center, Vector3.zero);
+        Vector3 midAxis = PrincipalAxis(pts, b.center, longAxis);
+        Vector3 thinAxis = Vector3.Cross(longAxis, midAxis).normalized;
+
+        // 넓은 면을 정면이 아니라 살짝 비스듬하게(옆으로 35도, 긴 축 쪽으로 15도) 바라보고,
+        // 긴 축이 화면에서 대각선(45도)으로 놓이게 한다
+        Vector3 viewDir = (thinAxis * Mathf.Cos(35f * Mathf.Deg2Rad) + midAxis * Mathf.Sin(35f * Mathf.Deg2Rad) + longAxis * 0.27f).normalized;
+        if (Vector3.Dot(viewDir, Vector3.up) < -0.2f) viewDir = -viewDir; // 아래에서 올려다보지 않게
+        Quaternion look = Quaternion.LookRotation(-viewDir, longAxis);
+        look = look * Quaternion.Euler(0f, 0f, -45f);
+        Vector3 up = look * Vector3.up;
+        float dist = Mathf.Max(b.size.magnitude, 0.05f) * 2f;
+
+        // 화면에 꽉 차게: 카메라 기준으로 부품 모서리들이 차지하는 범위를 재서 중심과 크기를 맞춘다
+        Vector3 right = look * Vector3.right;
+        float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+        foreach (Vector3 p in pts)
+        {
+            Vector3 d = p - b.center;
+            float x = Vector3.Dot(d, right), y = Vector3.Dot(d, up);
+            minX = Mathf.Min(minX, x); maxX = Mathf.Max(maxX, x); minY = Mathf.Min(minY, y); maxY = Mathf.Max(maxY, y);
+        }
+        Vector3 center = b.center + right * (minX + maxX) * 0.5f + up * (minY + maxY) * 0.5f;
+        float half = Mathf.Max(maxX - minX, maxY - minY) * 0.5f;
 
         var camGo = new GameObject("[ItemIconCamera]");
-        camGo.transform.SetPositionAndRotation(b.center + viewDir * dist, Quaternion.LookRotation(-viewDir, up));
+        camGo.transform.SetPositionAndRotation(center + viewDir * dist, look);
         var cam = camGo.AddComponent<Camera>();
         cam.enabled = false;
         cam.orthographic = true;
-        cam.orthographicSize = Mathf.Max(half * 1.15f, 0.001f);
+        cam.orthographicSize = Mathf.Max(half * 1.04f, 0.001f);
         cam.nearClipPlane = dist * 0.1f;
         cam.farClipPlane = dist * 3f;
         cam.cullingMask = 1 << IconLayer;
@@ -120,5 +138,30 @@ public static class ItemIconRenderer
         light.shadows = LightShadows.None;
     }
 
-    static Vector3 Axis(int i) => i == 0 ? Vector3.right : (i == 1 ? Vector3.up : Vector3.forward);
+    static void AddCorners(System.Collections.Generic.List<Vector3> pts, Bounds bb)
+    {
+        for (int i = 0; i < 8; i++)
+            pts.Add(bb.center + Vector3.Scale(bb.extents, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1)));
+    }
+
+    // 점들이 가장 길게 퍼진 방향 (exclude 방향 성분은 빼고 계산). 간단한 거듭제곱법.
+    static Vector3 PrincipalAxis(System.Collections.Generic.List<Vector3> pts, Vector3 c, Vector3 exclude)
+    {
+        float xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
+        foreach (Vector3 p in pts)
+        {
+            Vector3 d = p - c;
+            if (exclude != Vector3.zero) d -= exclude * Vector3.Dot(d, exclude);
+            xx += d.x * d.x; xy += d.x * d.y; xz += d.x * d.z; yy += d.y * d.y; yz += d.y * d.z; zz += d.z * d.z;
+        }
+        Vector3 v = exclude == Vector3.zero ? new Vector3(1f, 0.7f, 0.4f) : Vector3.Cross(exclude, new Vector3(0.3f, 1f, 0.5f));
+        for (int i = 0; i < 40; i++)
+        {
+            v = new Vector3(xx * v.x + xy * v.y + xz * v.z, xy * v.x + yy * v.y + yz * v.z, xz * v.x + yz * v.y + zz * v.z);
+            if (exclude != Vector3.zero) v -= exclude * Vector3.Dot(v, exclude);
+            if (v.sqrMagnitude < 1e-12f) return exclude == Vector3.zero ? Vector3.right : Vector3.Cross(exclude, Vector3.up).normalized;
+            v.Normalize();
+        }
+        return v;
+    }
 }

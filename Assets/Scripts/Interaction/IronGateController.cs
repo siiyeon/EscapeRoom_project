@@ -124,10 +124,32 @@ public class IronGateController : MonoBehaviour
             return;
         }
 
+        Unlock();
+    }
+
+    void Unlock()
+    {
         ShowNotice("열쇠로 자물쇠를 풀었다.");
         Inventory.Remove(KeyPickup.ItemId); // 사용한 아이템은 사라진다
         gateOpened = true;
         Open(instant: false);
+    }
+
+    /// <summary>
+    /// 인벤토리에서 열쇠를 [마우스 좌클릭]으로 사용했을 때: 철문 가까이 있으면 연다.
+    /// 열었으면 true, 철문이 멀거나 이미 열려 있으면 false.
+    /// </summary>
+    public static bool TryUseKey()
+    {
+        IronGateController gate = FindAnyObjectByType<IronGateController>();
+        if (gate == null || gate.isOpen || !KeyPickup.HasKey2) return false;
+        GameObject player = GameObject.FindWithTag("Player");
+        if (player == null) return false;
+        Vector3 d = player.transform.position - gate.gateCenter;
+        d.y = 0f;
+        if (d.magnitude > gate.interactionDistance) return false;
+        gate.Unlock();
+        return true;
     }
 
     void Open(bool instant)
