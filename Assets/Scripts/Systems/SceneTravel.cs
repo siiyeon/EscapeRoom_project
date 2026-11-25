@@ -82,6 +82,7 @@ public class SceneTravel : MonoBehaviour
         IronGateController.ResetOnGameStart();
         DoubleDoorController.ResetOnGameStart();
         EntranceShutter.ResetOnGameStart();
+        IntroRadio.ResetOnGameStart();
         Inventory.ResetOnGameStart();
         Mission.ResetOnGameStart();
 

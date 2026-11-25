@@ -15,9 +15,6 @@ public class KeyPickup : MonoBehaviour
     [Min(0.1f)] public float noticeDuration = 2.5f;
     bool collected, focused;
     CharacterController playerBody;
-    float noticeUntil;
-    GUIStyle style;
-    Font font;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     internal static void ResetInventory() { HasKey2 = false; pickupFrame = -1; }
@@ -87,11 +84,12 @@ public class KeyPickup : MonoBehaviour
     void Update()
     {
         focused = false;
-        if (collected || SceneTravel.IsTraveling || InventoryUI.IsOpen) return;
+        if (collected || SceneTravel.IsTraveling || InventoryUI.IsOpen || IntroRadio.IsPlaying) return;
         if (HasKey2) { HideKey(); return; }
         if (playerBody == null) playerBody = GameObject.FindWithTag("Player")?.GetComponent<CharacterController>();
         if (playerBody == null || !playerBody.enabled || !playerBody.gameObject.activeInHierarchy) return;
         focused = CanReach(playerBody);
+        if (focused) GameHUD.Prompt("[E] 열쇠 줍기");
         if (!focused || Keyboard.current == null || !Keyboard.current.eKey.wasPressedThisFrame) return;
         pickupFrame = Time.frameCount;
         var item = new InventoryItem
@@ -105,7 +103,9 @@ public class KeyPickup : MonoBehaviour
         };
         if (!Inventory.Add(item)) return;
         HasKey2 = true;
-        noticeUntil = Time.unscaledTime + noticeDuration;
+        GameHUD.Say("정문 열쇠를 획득했다.", noticeDuration);
+        GameHUD.Hint("[TAB] 인벤토리", noticeDuration);
+        StartCoroutine(SayAfter("이제 학교에 들어가자", noticeDuration));
         try { item.Icon = ItemIconRenderer.Render(gameObject); }
         catch (System.Exception error) { Debug.LogWarning("[KeyPickup] " + error.Message, this); }
         HideKey();
@@ -137,6 +137,12 @@ public class KeyPickup : MonoBehaviour
         return false;
     }
 
+    System.Collections.IEnumerator SayAfter(string line, float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        GameHUD.Say(line, noticeDuration);
+    }
+
     void HideKey()
     {
         collected = true;
@@ -147,24 +153,12 @@ public class KeyPickup : MonoBehaviour
 
     void OnGUI()
     {
-        if (SceneTravel.IsTraveling || InventoryUI.IsOpen) return;
-        if (!collected)
-        {
-            Color previous = GUI.color;
-            GUI.color = focused ? Color.green : Color.white;
-            GUI.DrawTexture(new Rect(Screen.width * 0.5f - 2f, Screen.height * 0.5f - 2f, 4f, 4f), Texture2D.whiteTexture);
-            GUI.color = previous;
-        }
-        string message = Time.unscaledTime < noticeUntil ? "정문 열쇠를 획득했다.  [TAB] 인벤토리" : focused ? "[E] 열쇠 줍기" : null;
-        if (message == null) return;
-        if (style == null)
-        {
-            font = Font.CreateDynamicFontFromOSFont("Malgun Gothic", 22);
-            style = new GUIStyle(GUI.skin.box) { font = font, fontSize = 22, alignment = TextAnchor.MiddleCenter };
-            style.normal.textColor = Color.white;
-        }
-        GUI.Box(new Rect((Screen.width - 520f) / 2f, Screen.height * 0.75f, 520f, 54f), message, style);
+        if (SceneTravel.IsTraveling || InventoryUI.IsOpen || IntroRadio.IsPlaying || collected) return;
+        // 화면 가운데 조준점 (열쇠를 집을 수 있으면 초록색)
+        Color previous = GUI.color;
+        GUI.color = focused ? Color.green : Color.white;
+        GUI.DrawTexture(new Rect(Screen.width * 0.5f - 2f, Screen.height * 0.5f - 2f, 4f, 4f), Texture2D.whiteTexture);
+        GUI.color = previous;
     }
 
-    void OnDestroy() { if (font != null) Destroy(font); }
 }
