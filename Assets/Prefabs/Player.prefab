@@ -146,7 +146,7 @@ MonoBehaviour:
   crouchCamY: 0.05
   crouchTransitionSpeed: 10
   cameraTransform: {fileID: 4243322262475869714}
-  mouseSensitivity: 1.5
+  mouseSensitivity: 0.15
   maxLookUpAngle: 80
   maxLookDownAngle: -80
 --- !u!114 &2093572523701783591
