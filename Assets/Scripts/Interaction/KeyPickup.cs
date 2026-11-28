@@ -105,7 +105,7 @@ public class KeyPickup : MonoBehaviour
         HasKey2 = true;
         GameHUD.Say("정문 열쇠를 획득했다.", noticeDuration);
         GameHUD.Hint("[TAB] 인벤토리", noticeDuration);
-        StartCoroutine(SayAfter("이제 학교에 들어가자", noticeDuration));
+        StartCoroutine(SayAfter("열쇠도 찾았으니, 이제 안으로 들어가 보자.", noticeDuration));
         try { item.Icon = ItemIconRenderer.Render(gameObject); }
         catch (System.Exception error) { Debug.LogWarning("[KeyPickup] " + error.Message, this); }
         HideKey();

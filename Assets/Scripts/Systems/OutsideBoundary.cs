@@ -21,8 +21,8 @@ public class OutsideBoundary : MonoBehaviour
     public float noticeDuration = 2.5f;
     // 옆 벽에 다가갈 때마다 이 중 하나가 랜덤으로 나온다
     // 열쇠를 줍기 전: 옆/뒤 어느 벽이든 이 대사, 열쇠를 주운 뒤: withKeyMessage
-    public string[] sideMessagesNoKey = { "철문 주변에 열쇠가 있다고 했지.." };
-    public string withKeyMessage = "이제 학교에 들어가자";
+    public string[] sideMessagesNoKey = { "이장님이 열쇠를 정문 근처에 두셨다고 했지…" };
+    public string withKeyMessage = "열쇠도 찾았으니, 이제 안으로 들어가 보자.";
 
     float sideLimit, backLimit;
     float gateOpeningMin, gateOpeningMax;

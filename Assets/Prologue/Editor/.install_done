@@ -1,0 +1,4 @@
+installed 2026-11-28T14:43:16
+렌더 파이프라인: URP
+URP 변환: 재질 38개, 비 파티클, 포스트 프로세싱 Volume (주의: 앰비언트 오클루전은 URP 렌더러 설정의 SSAO 를 켜야 합니다)
+Prologue 씬을 빌드 순서 0번으로 등록 (끝나면 다음 씬: Assets/Scenes/SampleScene.unity)

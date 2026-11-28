@@ -145,6 +145,7 @@ public class InventoryUI : MonoBehaviour
     void Open()
     {
         if (SceneTravel.IsTraveling || IsOpen || IntroRadio.IsPlaying) return; // 시작 무전 연출 중에는 안 열림
+        if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == SceneTravel.PrologueSceneName) return; // 프롤로그 컷신 중에는 안 열림
         IsOpen = true;
         IReadOnlyList<InventoryItem> list = section == Section.Gear ? Inventory.Gear : Inventory.Items;
         if (selected >= list.Count) { section = Section.Items; selected = 0; }

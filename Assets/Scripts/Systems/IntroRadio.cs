@@ -3,7 +3,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 /// <summary>
-/// 게임 시작 연출 (학교 씬을 처음 열 때 한 번만):
+/// 게임 시작 연출 (학교 씬을 처음 열 때 한 번만). 지금은 PlayOnGameStart = false 라서 꺼져 있음:
 /// 1) 왼손에 무전기를 들어 올리고, 화면이 부드럽게 무전기 쪽으로 돌아간다
 /// 2) 무전기 소리(Resources/Audio/Radio_1) 재생 + 무전 대사를 순서대로 화면 아래에 보여준다
 /// 3) 무전기를 내리고 다시 정면을 본 뒤 조작할 수 있게 된다
@@ -14,12 +14,16 @@ public class IntroRadio : MonoBehaviour
     public static bool IsPlaying { get; private set; }
     static bool played;
 
+    // 프롤로그 컷신에서 무전을 다 보여주므로, 게임 시작 때의 무전기 연출(고개 돌리기·무전 대사)은 끈다.
+    // 다시 쓰고 싶으면 true로 바꾸면 된다.
+    public static bool PlayOnGameStart = false;
+
     [Header("무전 대사 (순서대로, 각 줄 표시 시간)")]
-    public string speaker = "무전기";   // 대사 앞에 붙는 말하는 사람 (예: "무전기 : 산 너머...")
+    public string speaker = "상황실";   // 대사 앞에 붙는 말하는 사람 (예: "상황실 : 순찰 3호...")
     public string[] lines =
     {
-        "산 너머 폐교에서 이상한 소리난다고 또 전화하셨다",
-        "주변에 열쇠 놔뒀으니까 대충 한바퀴 둘러보고 철수해",
+        "순찰 3호, 건물 안에 들어가면 무전이 잘 안 잡힐 수도 있다.",
+        "열쇠 찾으면 정문부터 열고, 이상한 거 보이면 바로 보고해.",
     };
     public float lineSeconds = 3f;
 
@@ -48,6 +52,12 @@ public class IntroRadio : MonoBehaviour
     {
         if (played || GameObject.Find("Fence_Gate_L") == null) return;
         played = true;
+        if (!PlayOnGameStart)
+        {
+            // 연출 없이 바로 조작 가능. 조작 안내만 잠깐 보여준다.
+            GameHUD.Hint("[WASD] 이동", 3.5f);
+            return;
+        }
         var go = new GameObject("IntroRadio");
         SceneManager.MoveGameObjectToScene(go, scene);
         go.AddComponent<IntroRadio>();

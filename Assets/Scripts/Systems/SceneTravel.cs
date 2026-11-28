@@ -58,7 +58,7 @@ public class SceneTravel : MonoBehaviour
             Destroy(p);
         }
 
-        if (persistentPlayer == null)
+        if (persistentPlayer == null && scene.name != PrologueSceneName) // 프롤로그 컷신에는 플레이어가 없는 게 정상
             Debug.LogWarning("[SceneTravel] 'Player' 태그가 붙은 플레이어가 없습니다. 이 씬에서 바로 테스트하려면 플레이어를 넣고 태그를 Player로 설정하세요.");
     }
 
@@ -72,6 +72,9 @@ public class SceneTravel : MonoBehaviour
         Cursor.visible = true;
         return true;
     }
+
+    public const string GameSceneName = "SampleScene";   // 게임 본편(학교) 씬
+    public const string PrologueSceneName = "Prologue";  // 게임 시작 컷신 (빌드 순서 0번)
 
     internal static void RestartAfterDeath()
     {
@@ -93,7 +96,8 @@ public class SceneTravel : MonoBehaviour
             persistentPlayer = null;
         }
         AudioListener.pause = false;
-        SceneManager.LoadScene(0, LoadSceneMode.Single);
+        // 0번은 프롤로그 컷신이므로, 재시작은 게임 본편 씬으로
+        SceneManager.LoadScene(GameSceneName, LoadSceneMode.Single);
     }
 
     /// <summary>sceneName 씬으로 이동해서 doorId 문 앞에 도착한다.</summary>

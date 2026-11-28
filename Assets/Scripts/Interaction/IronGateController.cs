@@ -139,7 +139,7 @@ public class IronGateController : MonoBehaviour
 
         if (!KeyPickup.HasKey2)
         {
-            GameHUD.Say("쇠사슬과 자물쇠로 단단히 잠겨 있다. 열쇠가 필요하다.", noticeDuration);
+            GameHUD.Say("쇠사슬로 단단히 감겨 있다. 열쇠가 있어야겠어.", noticeDuration);
             return;
         }
 
